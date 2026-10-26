@@ -33,11 +33,16 @@ jobs:
       # Carries the last good aggregated snapshot between runs. The committed cache/*.csv is the
       # floor; this restores anything fresher, so a build that meets an entsoemcp.com outage or
       # rate limit still publishes recent data. cache/raw/ is excluded: it is per-build scratch.
+      # cache/residual/ also saves the residual-load loader from re-downloading ~500 MB of hourly
+      # generation: it only fetches the weeks after its snapshot. cache/gen-hourly/ does the same
+      # for the hourly generation-mix loader.
       - name: Restore data cache
         uses: actions/cache@v4
         with:
           path: |
             cache/*.csv
+            cache/residual/*.csv
+            cache/gen-hourly/*.csv
           key: dam-${{ github.run_id }}
           restore-keys: dam-
 

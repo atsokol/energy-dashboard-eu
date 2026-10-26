@@ -12,7 +12,7 @@ import {existsSync, mkdirSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {buildHarness, ROOT} from "./harness.mjs";
 
-const PAGES = ["prices", "spreads", "generation"];
+const PAGES = ["generation", "prices", "spreads", "capture"];
 const width = Number(process.env.HARNESS_WIDTH ?? 800);
 const tmp = resolve(ROOT, "test/.generated");
 mkdirSync(tmp, {recursive: true});
@@ -70,6 +70,11 @@ for (const page of PAGES) {
   if (mod.cells.mix) {
     mod.cells.mix.length >= 15 ? ok(`generation map: ${mod.cells.mix.length} zones with a full year`)
                                : bad(`generation map: only ${mod.cells.mix.length} zones with a full year`);
+  }
+  for (const name of ["solarValues", "windValues"]) {
+    if (!mod.cells[name]) continue;
+    mod.cells[name].length >= 12 ? ok(`${name} map: ${mod.cells[name].length} zones shaded`)
+                                 : bad(`${name} map: only ${mod.cells[name].length} zones shaded`);
   }
   if (mod.cells.spreadValues) {
     mod.cells.spreadValues.length >= 15 ? ok(`spread map: ${mod.cells.spreadValues.length} zones shaded`)

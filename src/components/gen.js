@@ -124,6 +124,49 @@ export function seasonalProfiles(rows, zone, year) {
   });
 }
 
+/**
+ * Average output per group, and average load, by calendar month and local hour of day for one
+ * zone: [{month: "YYYY-MM", hour, group, mw}], load as group "load". `genRows` and `loadRows` are
+ * hourly `generation_per_type` and `actual_load` CSV rows. As in seasonalProfiles, each production
+ * type is averaged on its own before it is summed into its group.
+ */
+export function monthHourProfiles(genRows, loadRows, zone) {
+  const local = (ts) => localTime(Date.parse(ts.slice(0, 19).replace(" ", "T") + "Z"), zone);
+  const add = (acc, key, mw) => {
+    let a = acc.get(key);
+    if (!a) acc.set(key, (a = {sum: 0, n: 0}));
+    a.sum += mw; a.n += 1;
+  };
+  const gen = new Map();
+  for (const r of genRows) {
+    const mw = value(r.actual_mw);
+    if (!groupOfPsr.has(r.psr_type) || !Number.isFinite(mw)) continue;
+    const {date, hour} = local(r.ts_utc);
+    add(gen, `${date.slice(0, 7)}|${hour}|${r.psr_type}`, mw);
+  }
+  const load = new Map();
+  for (const r of loadRows) {
+    const mw = value(r.load_mw);
+    if (!Number.isFinite(mw)) continue;
+    const {date, hour} = local(r.ts_utc);
+    add(load, `${date.slice(0, 7)}|${hour}`, mw);
+  }
+  const groups = new Map();
+  for (const [key, {sum, n}] of gen) {
+    const [month, hour, psr] = key.split("|");
+    const id = `${month}|${hour}|${groupOfPsr.get(psr)}`;
+    groups.set(id, (groups.get(id) ?? 0) + sum / n);
+  }
+  for (const [key, {sum, n}] of load) groups.set(`${key}|load`, sum / n);
+  const order = [...GEN_KEYS, "load"];
+  return [...groups]
+    .map(([id, mw]) => {
+      const [month, hour, group] = id.split("|");
+      return {month, hour: +hour, group, mw};
+    })
+    .sort((a, b) => (a.month !== b.month ? (a.month < b.month ? -1 : 1) : a.hour - b.hour || order.indexOf(a.group) - order.indexOf(b.group)));
+}
+
 // ---------------------------------------------------------------------------------------------
 // Page roll-ups
 // ---------------------------------------------------------------------------------------------

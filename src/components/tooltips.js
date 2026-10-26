@@ -8,6 +8,7 @@
 
 export function multiSeriesTip(d3, Plot, {
   y,
+  label = y,
   value,
   valueFormat = d3.format(".1f"),
   header,
@@ -20,6 +21,11 @@ export function multiSeriesTip(d3, Plot, {
     if (i === undefined) return g.node();
 
     const rows = values.title[i];
+    // Ordinal colour: keep the legend's order. Continuous colour: one slot per row, in value order.
+    const color = scales.scales.color;
+    const domain = color.type === "ordinal" || color.type === "categorical"
+      ? color.domain
+      : [...new Set(rows.map((d) => d[y]))].sort(d3.ascending);
     // Anchor the panel on the bin's own `x` channel, which the `{x: "min"}` output in every
     // pointer binX here supplies (see CHARTS.md): it is the x of the data in the bin, so the panel
     // lands on the plotted point, its axis tick and the ruleX guide line all at once. Without that
@@ -56,11 +62,11 @@ export function multiSeriesTip(d3, Plot, {
           height: 20 + rows.length * rowHeight,
           width,
           axis: null,
-          y: {domain: scales.scales.color.domain},
+          y: {type: "point", domain},
           marks: [
             Plot.frame({fill: "var(--theme-background)", stroke: "currentColor"}),
             Plot.dot(rows, {y, fill: (d) => scales.color(d[y]), r: 5, frameAnchor: "left", symbol: "square2", dx: 7}),
-            Plot.text(rows, {y, text: y, frameAnchor: "left", dx: 14}),
+            Plot.text(rows, {y, text: label, frameAnchor: "left", dx: 14}),
             Plot.text(rows, {y, text: (d) => valueFormat(d[value]), frameAnchor: "right", dx: -2}),
             Plot.text([rows[0]], {frameAnchor: "top-left", dy: -13, text: header})
           ]

@@ -5,19 +5,16 @@ toc: true
 
 # Generation mix
 
-Actual electricity generation by production type for the bidding zones in scope, from January
-2021, as reported to the ENTSO-E Transparency Platform and sourced through
-[entsoemcp.com](https://entsoemcp.com). The twenty ENTSO-E production types are folded into
-eight groups. **Coal & lignite** also includes coal-derived gas, peat and Estonia's oil shale.
-**Hydro** includes the output of pumped-storage plants but not the power they pump with.
-**Biomass & other RES** covers biomass, waste, geothermal and other renewables. **Other** covers
-oil, batteries and unclassified plants. Figures are gross output as the TSOs report it. They
-include no imports, and in some countries they leave out small rooftop solar.
+Actual generation by type from 2021 (ENTSO-E via [entsoemcp.com](https://entsoemcp.com)), in eight
+groups. **Coal & lignite** includes oil shale; **hydro** includes pumped-storage output; **other**
+is oil, batteries and unclassified. Gross output as reported: no imports, and some countries omit
+rooftop solar.
 
 ```js
 import {ZONES} from "./components/zones.js"
+import {rememberZone, savedZone} from "./components/linking.js"
 import {annualMix, lastFullYear} from "./components/gen.js"
-import {GEN_COLORS, capacityChart, generationAreaChart, linkMapToInput, mixMap, seasonalProfileChart} from "./components/charts.js"
+import {GEN_COLORS, GEN_OPACITY, capacityChart, generationAreaChart, linkMapToInput, mixMap, seasonalProfileChart} from "./components/charts.js"
 ```
 
 ```js
@@ -40,15 +37,13 @@ const profileYear = profilesRaw[0].year
 
 ## Generation mix map
 
-Each zone's generation over the last full calendar year, split by type. The donut's area is
-proportional to the zone's total generation, so Germany's dwarfs Montenegro's. The smallest
-donuts are drawn at a minimum size so they stay readable, which overstates them slightly. A zone
-is shown only when it reported all twelve months; Albania's generation data starts in 2026. Click
-a country to show it in the charts below.
+Generation by type over the last full year; donut area is proportional to total generation
+(smallest donuts enlarged to stay readable). Zones need all twelve months. Click a country to
+select it below.
 
 ```js
-// Shown above the charts below; declared here because the map highlights the selected zone.
-const zoneInput = Inputs.select(new Map(ZONES.map((z) => [z.name, z.key])), {value: "HU", label: "Country"})
+// Shown below; declared here because the map highlights it. Shared across pages and remembered.
+const zoneInput = rememberZone(Inputs.select(new Map(ZONES.map((z) => [z.name, z.key])), {value: savedZone("HU"), label: "Country"}))
 const zone = Generators.input(zoneInput)
 ```
 
@@ -58,10 +53,8 @@ linkMapToInput(mixMap({d3, Plot, geo, width, mix, selected: zone, year: mixYear}
 
 ## Monthly generation and installed capacity
 
-Monthly generation shows the seasonal swing between types: solar peaks in summer, while wind,
-hydro and fossil plants carry the winter. Installed capacity is the TSO's latest snapshot, taken
-at the start of the year. Capacity counts every plant whether or not it runs, so a type's share of capacity is usually far above its share
-of generation for solar and wind, and below it for nuclear.
+Monthly generation shows the seasonal swing; capacity is the latest start-of-year snapshot. Solar
+and wind hold far more of capacity than of generation; nuclear the reverse.
 
 ```js
 zoneInput
@@ -90,7 +83,7 @@ const capacityWidth = sideBySide ? pairWidth - pairGap - areaWidth : pairWidth
 
 ```js
 html`<div style="max-width: 800px">
-  ${Plot.legend({color: GEN_COLORS})}
+  ${Plot.legend({color: GEN_COLORS, opacity: GEN_OPACITY})}
   <div style="display: grid; grid-template-columns: ${sideBySide ? `${areaWidth}px ${capacityWidth}px` : "1fr"}; gap: ${pairGap}px; align-items: start;">
     ${zoneMonthly.length ? generationAreaChart({d3, Plot, rows: zoneMonthly, zone, width: areaWidth}) : html`<p>No generation data for this country in the selected years.</p>`}
     ${zoneCapacity.length ? capacityChart({d3, Plot, rows: zoneCapacity, zone, width: capacityWidth}) : html`<p>No installed-capacity data for this country.</p>`}
@@ -100,10 +93,8 @@ html`<div style="max-width: 800px">
 
 ## Typical day by season
 
-Average generation at each local hour of the day in ${profileYear}, by season. Each panel is the
-mean of every day in the season, so it shows a typical day rather than any real one. The midday
-solar bulge and how other types make room for it show where storage and flexible demand have the
-most to gain. All four panels share one scale.
+Average generation by local hour in ${profileYear}, per season, on one scale. The midday solar
+bulge shows where storage and flexible demand gain most.
 
 ```js
 const zoneProfiles = profiles.filter((d) => d.zone === zone)

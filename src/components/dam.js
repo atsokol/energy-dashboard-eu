@@ -64,7 +64,7 @@ export function localTime(ms, zone) {
 
 /**
  * Normalise rows of an entsoemcp.com hourly CSV (`ts_utc,currency,eur_per_mwh`) for one zone into
- * `{date, hour, price}` in local market time and EUR.
+ * `{date, hour, price, ts}` in local market time and EUR; `ts` is the hour's UTC start in ms.
  *
  * Duplicate timestamps occur where the feed holds both a labelled and an unlabelled copy of the
  * same hour (2026-07-15 07:00Z in several zones, with different values); the labelled row is the
@@ -84,8 +84,9 @@ export function normaliseHourly(rows, zone) {
   for (const [ts, {currency, price}] of byTs) {
     const eur = toEur(price, currency, ts.slice(0, 7));
     if (!Number.isFinite(eur)) continue;
-    const {date, hour} = localTime(Date.parse(ts), zone);
-    out.push({date, hour, price: eur});
+    const ms = Date.parse(ts);
+    const {date, hour} = localTime(ms, zone);
+    out.push({date, hour, price: eur, ts: ms});
   }
   return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.hour - b.hour));
 }
@@ -103,7 +104,8 @@ const MIN_HOURS_PER_DAY = 22;
 const mean = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length;
 
 /**
- * Per local market day: hour-weighted average price and the TB1/TB2/TB4 spreads.
+ * Per local market day: hour-weighted average price, the TB1/TB2/TB4 spreads, and the top-x
+ * means they start from (`top1` is the day's maximum; the bottom-x mean is topx − tbx).
  *
  * TBx is the mean of the day's x most expensive hours minus the mean of its x cheapest, in
  * EUR/MWh — the gross margin per MWh cycled by an x-hour battery with perfect foresight, one
@@ -132,14 +134,17 @@ export function dailyMetrics(hourly) {
       date, avg: mean(prices), hours: prices.length,
       neg_hours: negative.length, neg_value: negative.reduce((s, p) => s + p, 0)
     };
-    for (const x of TB_DURATIONS) row[`tb${x}`] = mean(sorted.slice(-x)) - mean(sorted.slice(0, x));
+    for (const x of TB_DURATIONS) {
+      row[`top${x}`] = mean(sorted.slice(-x));
+      row[`tb${x}`] = row[`top${x}`] - mean(sorted.slice(0, x));
+    }
     out.push(row);
   }
   return out;
 }
 
 // ---------------------------------------------------------------------------------------------
-// Intraday volatility
+// Periods
 // ---------------------------------------------------------------------------------------------
 
 function quantileSorted(sorted, p) {
@@ -148,33 +153,6 @@ function quantileSorted(sorted, p) {
   const lo = Math.floor(i);
   return lo + 1 < sorted.length ? sorted[lo] + (sorted[lo + 1] - sorted[lo]) * (i - lo) : sorted[lo];
 }
-
-/** P10 / P50 / P90 of the hourly price by calendar year and local hour of day. */
-export function hourlyQuantiles(hourly) {
-  const groups = new Map();
-  for (const d of hourly) {
-    const key = `${d.date.slice(0, 4)}|${d.hour}`;
-    let xs = groups.get(key);
-    if (!xs) groups.set(key, (xs = []));
-    xs.push(d.price);
-  }
-  return [...groups]
-    .map(([key, xs]) => {
-      const [year, hour] = key.split("|");
-      const sorted = xs.sort((a, b) => a - b);
-      return {
-        year, hour: +hour, n: sorted.length,
-        p10: quantileSorted(sorted, 0.1), p50: quantileSorted(sorted, 0.5), p90: quantileSorted(sorted, 0.9)
-      };
-    })
-    // A year needs a few weeks of observations per hour before its percentiles mean anything.
-    .filter((d) => d.n >= 28)
-    .sort((a, b) => (a.year < b.year ? -1 : a.year > b.year ? 1 : a.hour - b.hour));
-}
-
-// ---------------------------------------------------------------------------------------------
-// Periods
-// ---------------------------------------------------------------------------------------------
 
 const iso = (d) => d.toISOString().slice(0, 10);
 const addDays = (s, n) => iso(new Date(Date.parse(s) + n * 86_400_000));
@@ -332,6 +310,21 @@ export function rollingMeans(daily, field, window = 30) {
 }
 
 /**
+ * One zone's spread band: trailing `window`-day means of the daily top-x and bottom-x prices,
+ * the daily average and the TBx spread ({date, top, bottom, avg, spread}). The means are taken
+ * over the same days, so top − bottom equals the rolling spread exactly.
+ */
+export function spreadBand(daily, zone, tb, window = 30) {
+  const x = tb.slice(2);
+  const rows = daily
+    .filter((d) => d.zone === zone && [d.avg, d[tb], d[`top${x}`]].every(Number.isFinite))
+    .map((d) => ({zone, date: d.date, avg: d.avg, top: d[`top${x}`], bottom: d[`top${x}`] - d[tb]}));
+  const ma = (field) => new Map(rollingMeans(rows, field, window).map((d) => [d.date, d.ma]));
+  const [top, bottom, avg] = ["top", "bottom", "avg"].map(ma);
+  return [...top].map(([date, t]) => ({date, top: t, bottom: bottom.get(date), avg: avg.get(date), spread: t - bottom.get(date)}));
+}
+
+/**
  * Running total of `field` through each calendar year, per day: {year, day: "MM-DD", value}.
  * Years start from zero on 1 January, so they compare as cumulative curves on one Jan-Dec axis.
  */
@@ -345,4 +338,26 @@ export function cumulativeByYear(daily, field) {
     out.push({year, day: d.date.slice(5), value: sum});
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Gas-plant cost
+// ---------------------------------------------------------------------------------------------
+
+// Short-run cost of a ~50%-efficient CCGT in EUR/MWh: 2 MWh of gas and 0.4 t of CO2 per MWh of
+// power (0.2 t/MWh gas emission factor ÷ 0.5). A yardstick for where gas sets the price, not a
+// zone's actual marginal plant; one German hub (THE) price serves every zone in scope.
+export const GAS_PLANT = {gas: 2, co2: 0.4};
+export const gasPlantCost = (gas, co2) => GAS_PLANT.gas * gas + GAS_PLANT.co2 * co2;
+
+/** Calendar-month means of the daily fuel rows: [{month: "YYYY-MM-01", gas, co2, cost}]. */
+export function fuelMonthly(fuel) {
+  const acc = new Map();
+  for (const d of fuel) {
+    const key = `${d.date.slice(0, 7)}-01`;
+    let a = acc.get(key);
+    if (!a) acc.set(key, (a = {gas: 0, co2: 0, cost: 0, n: 0}));
+    a.gas += d.gas; a.co2 += d.co2; a.cost += d.cost; a.n += 1;
+  }
+  return [...acc].map(([month, a]) => ({month, gas: a.gas / a.n, co2: a.co2 / a.n, cost: a.cost / a.n}));
 }

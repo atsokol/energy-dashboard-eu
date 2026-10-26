@@ -5,19 +5,15 @@ toc: true
 
 # Day-ahead spreads
 
-The **TBx (top-x / bottom-x)** spread measures the arbitrage available to a battery on the
-day-ahead market: the average of a market day's x most expensive hourly prices minus the average
-of its x cheapest. It approximates the gross margin per MWh cycled by an x-hour battery that
-charges and discharges once a day with perfect foresight, before round-trip losses. TB1, TB2 and
-TB4 stand for one-, two- and four-hour batteries. Spreads are computed on hourly prices
-throughout. Since SDAC moved to 15-minute products in October 2025, each hour is the mean of its
-four quarter-hours, which keeps every year on one basis but understates what quarter-hour
-dispatch can capture.
+The **TBx spread** is the average of a day's x dearest hourly prices minus its x cheapest: the
+gross margin per MWh of an x-hour battery cycling once a day with perfect foresight. Computed on
+hourly prices, so it understates what 15-minute dispatch (since October 2025) can capture.
 
 ```js
 import {ZONES} from "./components/zones.js"
-import {anchorDay, listPeriods, periodMeans, rollingMeans, stableDomain} from "./components/dam.js"
-import {linkMapToInput, spreadLines, zoneMap} from "./components/charts.js"
+import {linkPeriod, linkValue, periodLinks, rememberZone, savedZone} from "./components/linking.js"
+import {anchorDay, listPeriods, periodMeans, rollingMeans, spreadBand, stableDomain} from "./components/dam.js"
+import {linkMapToInput, spreadBandChart, spreadLines, zoneMap} from "./components/charts.js"
 ```
 
 ```js
@@ -26,9 +22,14 @@ const geo = await FileAttachment("./data/europe.geo.json").json()
 ```
 
 ```js
-const daily = dailyRaw.map((d) => ({zone: d.zone, date: d.date, tb1: +d.tb1, tb2: +d.tb2, tb4: +d.tb4}))
+const daily = dailyRaw.map((d) => ({
+  zone: d.zone, date: d.date, avg: +d.avg, tb1: +d.tb1, tb2: +d.tb2, tb4: +d.tb4,
+  top1: +d.top1, top2: +d.top2, top4: +d.top4
+}))
 
 const anchor = anchorDay(daily)
+// Period type, month and year: shared with the prices page and remembered.
+const links = periodLinks(anchor)
 ```
 
 ```js
@@ -37,23 +38,23 @@ const tb = view(Inputs.radio(new Map([["TB1", "tb1"], ["TB2", "tb2"], ["TB4", "t
 
 ## Spread map
 
-Each zone's average daily spread over a year, month or week: pick the period type, then the period.
-The latest period is shown to date while it is still in progress. The colour scale is fixed for
-each period type and spread, so colours compare across periods; the most extreme 2% of values at
-either end take the end colours. A zone is shaded only when it reported at least 80% of the
-period's days (so far). Click a country to add it to the comparison below.
+Average daily spread by zone for the chosen period; the latest period is shown to date. Colours are
+fixed per period type so periods compare. Click a country to show it below.
 
 ```js
 const PERIOD_KINDS = [["Year", "year"], ["Month", "month"], ["Week", "week"]]
-const periodKind = view(Inputs.radio(new Map(PERIOD_KINDS), {value: "month", label: "Period"}))
+const periodKind = view(linkValue(links.kind, "kind", Inputs.radio(new Map(PERIOD_KINDS), {value: "month", label: "Period"}), {
+  accepts: (k) => PERIOD_KINDS.some(([, v]) => v === k)
+}))
 ```
 
 ```js
 const periodOptions = listPeriods(periodKind, anchor)
-const period = view(Inputs.select(periodOptions, {
+// A month or year period follows the month and year chosen on the prices page.
+const period = view(linkPeriod(links, Inputs.select(periodOptions, {
   value: periodOptions[0], format: (p) => p.label,
   label: PERIOD_KINDS.find(([, k]) => k === periodKind)[0]
-}))
+}), periodKind, periodOptions))
 ```
 
 ```js
@@ -63,35 +64,57 @@ const spreadValues = spreadsByPeriod.get(period.key)
 ```
 
 ```js
-const zonesInput = Inputs.checkbox(new Map(ZONES.map((z) => [z.short, z.key])), {value: ["DE_LU", "PL", "HU", "RO", "GR", "LT"], label: "Countries"})
+// Shown below; declared here because the map highlights it. Shared across pages and remembered.
+const bandZoneInput = rememberZone(Inputs.select(new Map(ZONES.map((z) => [z.name, z.key])), {value: savedZone("DE_LU"), label: "Country"}))
+const bandZone = Generators.input(bandZoneInput)
 ```
 
 ```js
 linkMapToInput(zoneMap({
   d3, Plot, geo, width,
-  values: spreadValues, selected: null, domain: spreadDomain,
+  values: spreadValues, selected: bandZone, domain: spreadDomain,
   title: `Average ${tb.toUpperCase()} spread — ${period.label}`,
   subtitle: `Mean daily top-${tb.slice(2)} minus bottom-${tb.slice(2)} hourly price`,
   label: "EUR / MWh",
-}), zonesInput, {toggle: true})
+}), bandZoneInput)
 ```
 
-## Spread evolution
+## Top, bottom and the gap
 
-Regional markets are coupled by cross-border trading, so spreads in neighbouring zones tend to
-move together. A sustained gap points to a local driver, such as solar penetration, flexible
-capacity or import constraints, rather than a regional one.
+A spread widens when peak prices rise, off-peak prices fall, or both. Peaks are usually set by gas
+plants, so dearer gas lifts the top leg too.
 
 ```js
-const zones = view(zonesInput)
+bandZoneInput
 ```
 
 ```js
-const fromYear = view(Inputs.select(["2021", "2022", "2023", "2024", "2025", "2026"], {value: "2021", label: "From"}))
+const bandFrom = view(Inputs.select(["2021", "2022", "2023", "2024", "2025", "2026"], {value: "2023", label: "From"}))
 ```
 
 ```js
 const MA_WINDOW = 30
+const band = spreadBand(daily, bandZone, tb, MA_WINDOW).filter((d) => d.date >= `${bandFrom}-01-01`)
+```
+
+```js
+spreadBandChart({d3, Plot, width, rows: band, zone: bandZone, tb, window: MA_WINDOW})
+```
+
+## Spread evolution
+
+Coupled markets move together, so a lasting gap between neighbours points to a local driver: solar,
+flexible capacity or import limits.
+
+```js
+const zones = view(Inputs.checkbox(new Map(ZONES.map((z) => [z.short, z.key])), {value: ["DE_LU", "PL", "HU", "RO", "GR", "LT"], label: "Countries"}))
+```
+
+```js
+const fromYear = view(Inputs.select(["2021", "2022", "2023", "2024", "2025", "2026"], {value: "2023", label: "From"}))
+```
+
+```js
 const spreadMa = rollingMeans(daily.filter((d) => zones.includes(d.zone)), tb, MA_WINDOW)
   .filter((d) => d.date >= `${fromYear}-01-01`)
 ```

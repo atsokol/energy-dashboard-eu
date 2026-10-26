@@ -10,26 +10,33 @@ fallback, shared client modules in `src/components/`, a jsdom smoke test gating 
 
 ## Pages
 
-- **Day-ahead prices** (`/prices`): price map (any year / month / week / day since 2021, the
-  current one to date), monthly average price (from a chosen start year) and intraday P10/P50/P90
-  by year for a selected country.
-- **Day-ahead spreads** (`/spreads`): TB1/2/4 map (any year / month / week, the current one to
-  date) and a 30-day moving-average comparison across countries.
 - **Generation mix** (`/generation`): donut map of each zone's mix in the last full year (area ∝
   total generation), monthly generation by type beside the latest installed-capacity snapshot, and average
   hourly generation by season (winter/spring/summer/autumn) for a selected country.
+- **Day-ahead prices** (`/prices`): price map (any year / month / week / day since 2021, the
+  current one to date), monthly average price (from a chosen start year), average hourly residual
+  load and price for a chosen month by year, the same month by month through one year with the
+  generation mix by hour of that year and month, a price vs residual-load scatter, and cumulative
+  negative-price hours for a selected country.
+- **Day-ahead spreads** (`/spreads`): TB1/2/4 map (any year / month / week, the current one to
+  date), the top/bottom spread band for the selected country, and a 30-day moving-average
+  comparison across countries.
+- **Capture factors** (`/capture`): solar and wind capture factor maps (any year or month, a
+  diverging scale centred on 100%), annual and seasonal capture factors for chosen countries, and
+  monthly capture factor against the technology's share of generation.
 
 Map colour scales are fixed per period type (P2-P98 of all zone-period values, clamped), so
 colours compare across periods.
 
-Clicking a country on a map selects it (prices) or adds/removes it from the comparison (spreads).
+Clicking a country on a map selects it. The country, period type, month and year are shared
+across pages and remembered (localStorage); a month or year map period follows the month and year
+controls.
 
 ## Data pipeline
 
-All data is downloaded and aggregated at build time. `src/data/dam-daily.csv.js` and
-`src/data/dam-quantiles.csv.js` fetch hourly prices for every zone (one `/download` call per zone)
-and reduce them to `dam-daily.csv` (zone × day: average, TB1, TB2, TB4) and `dam-quantiles.csv`
-(zone × year × hour: P10/P50/P90). Pages load ~580 KB of gzipped static files and are ready in
+All data is downloaded and aggregated at build time. `src/data/dam-daily.csv.js` fetches hourly
+prices for every zone (one `/download` call per zone) and reduces them to `dam-daily.csv` (zone ×
+day: average, TB1, TB2, TB4, negative hours). Pages load ~580 KB of gzipped static files and are ready in
 about 0.2 s. If entsoemcp.com is down or rate-limits the build, loaders serve the last snapshot
 committed in `cache/`, so the build still succeeds.
 
@@ -39,6 +46,29 @@ MW, from `installed_generation_capacity`) and `gen-profiles.csv` (zone × season
 group, mean MW, for the last full year). The profiles need a year of hourly data (~60 MB across
 all zones, ~30 s), so that loader reuses its cached snapshot while it is still for the right year
 and only downloads again in January.
+
+Residual load comes from the parameterized loader `src/data/residual/[zone].csv.js`, which
+writes one file per zone (`date,hour,price,rl`: every local hour since 2021 with its price and
+load − wind − solar in MW, ~1.3 MB, ~0.4 MB gzipped), so the prices page loads only the selected
+country. It joins hourly prices (shared raw cache), `actual_load` and hourly `generation_per_type`
+on the UTC hour. Hourly generation is ~5 MB per zone-year (~500 MB for all zones since 2021), so
+the loader keeps its cached snapshot (`cache/residual/`) up to the start of the month before its
+latest month and downloads only from there (~2 s per zone a day). `RESIDUAL_FULL=1` forces a full
+re-download (~25 s per zone).
+
+The hourly generation mix comes from `src/data/gen-hourly/[zone].csv.js` (`month,hour,group,mw`:
+average MW per generation group, and load as group `load`, at each local hour of every month since
+2021, ~0.3 MB per zone). It downloads the same hourly `generation_per_type` and `actual_load` as
+the residual loader and is incremental the same way (`cache/gen-hourly/`, `GEN_HOURLY_FULL=1`
+forces a full re-download, ~17 s per zone).
+
+Capture prices come from `src/data/capture-monthly.csv.js` (`zone,month,tech,capture,base,gwh,
+hours`). It calls entsoemcp.com's server-side `capture_price` derivation (`/api/derivation`, JSON,
+local months; one ~1 s call per zone for the whole window) for solar (B16) and wind onshore and
+offshore (B18, B19). The server weights hourly prices by hourly output, so no hourly generation
+is downloaded. The page rolls months up into years and seasons as generation-weighted capture
+price over hour-weighted baseload (`src/components/capture.js`), never as a mean of monthly
+factors.
 
 A browser-side live fetch was prototyped and dropped: it took 4–31 s per page, and entsoemcp.com
 sends no CORS headers and rate-limits per IP (HTTP 429, ~35 s Retry-After).
@@ -83,8 +113,22 @@ node test/serve-dist.mjs   # serve the built dist/ like GitHub Pages (gzip) on :
   other renewable); solar; other (oil, batteries, other). Monthly GWh = monthly mean MW × days ×
   24, local months, the month in progress dropped. AL has generation data only from 2026, so it is
   absent from the 2025 map and profiles.
+- **Capture factor** = output-weighted day-ahead price ÷ baseload (all-hours) price in the same
+  period. Wind is onshore + offshore, each type weighted by its own output. A month that switched
+  currency arrives split per currency and is converted to EUR before combining. Seasons are
+  meteorological (winter = December to February, counted with the January's year); a year on the
+  maps and annual lines needs all twelve months, except the year in progress (dashed). SK and SI
+  report only a few MW of wind, and RS/ME report no solar, so those values are thin or absent.
+  Market share in the dot plots is of reported generation (gen-monthly), not of load.
 - **Capacity**: the page shows each zone's latest annual snapshot. ENTSO-E has snapshots for most
   zones only from 2025 (DE-LU and PL earlier); the loader keeps them all.
 - **Generation colours**: CSS tokens `--gen-*` in `src/style.css` (brown coal, orange gas, light-blue
   hydro, blue wind, green biomass/RES, yellow solar, violet nuclear), light and dark shades
   validated for colour-vision separation in the stacking order of `GEN_GROUPS`.
+- **Gas and carbon prices**: THE (German hub) day-ahead gas and EEX EUA auction prices, daily,
+  from the data file behind Energy-Charts' German spot-market chart (no public API carries
+  them). Weekend and holiday gaps carry the last price forward. THE serves as the European gas
+  reference for every zone: CEE hubs price off THE/TTF, and THE spot differs from the TTF front
+  month by a median ~1 EUR/MWh outside 2022. Energy-Charts restricts some datasets to private and
+  internal use; check the licence before relying on these in a public deployment.
+- **Gas-plant cost** = 2 × gas + 0.4 × EUA (EUR/MWh): fuel and carbon for a ~50%-efficient CCGT.

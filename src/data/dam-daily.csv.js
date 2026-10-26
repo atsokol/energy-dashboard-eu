@@ -18,7 +18,8 @@ process.stdout.write(
       for (const d of dailyMetrics(normaliseHourly(raw.get(zone), zone))) {
         if (d.date < START_DATE) continue;
         rows.push({
-          zone, date: d.date, avg: round(d.avg), tb1: round(d.tb1), tb2: round(d.tb2), tb4: round(d.tb4), hours: d.hours,
+          zone, date: d.date, avg: round(d.avg), tb1: round(d.tb1), tb2: round(d.tb2), tb4: round(d.tb4),
+          top1: round(d.top1), top2: round(d.top2), top4: round(d.top4), hours: d.hours,
           neg_hours: d.neg_hours, neg_value: round(d.neg_value)
         });
       }

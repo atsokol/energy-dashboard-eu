@@ -99,12 +99,14 @@ globalThis.html = (strings, ...values) => {
 };
 const view = (input) => input.value;
 const Generators = {input: (input) => input.value};
+// Event targets, so a page can link one input to another.
+const input = (value) => Object.assign(new dom.window.EventTarget(), {value});
 const Inputs = {
-  date: ({value}) => ({value}),
-  range: (domain, {value} = {}) => ({value}),
-  radio: (options, {value} = {}) => ({value}),
-  select: (options, {value} = {}) => ({value}),
-  checkbox: (options, {value} = {}) => ({value}),
+  date: ({value}) => input(value),
+  range: (domain, {value} = {}) => input(value),
+  radio: (options, {value} = {}) => input(value),
+  select: (options, {value} = {}) => input(value),
+  checkbox: (options, {value} = {}) => input(value),
 };
 // Loader outputs are read from cache/ (their committed snapshot); static files from src/data/.
 const attachmentText = (path) => {
