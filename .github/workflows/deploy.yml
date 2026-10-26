@@ -4,10 +4,10 @@ on:
   push:
     branches: [main]
   schedule:
-    # Daily rebuild after the day-ahead auction: SDAC results are out ~12:45 CET and entsoemcp.com
-    # usually lands them within 1-3 hours. Cron is UTC and ignores DST: 15:30 UTC is 16:30 CET /
-    # 17:30 CEST, so tomorrow's prices are normally in every build.
-    - cron: "30 15 * * *"
+    # Weekly rebuild on Mondays after the day-ahead auction: SDAC results are out ~12:45 CET and
+    # entsoemcp.com usually lands them within 1-3 hours. Cron is UTC and ignores DST: 15:30 UTC is
+    # 16:30 CET / 17:30 CEST, so Tuesday's prices are normally in the build.
+    - cron: "30 15 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -52,7 +52,7 @@ jobs:
       - name: Build site
         run: npm run build
 
-      # The site rebuilds unattended every day. Without a check between build and deploy, an
+      # The site rebuilds unattended every week. Without a check between build and deploy, an
       # upstream schema change would publish a blank dashboard silently.
       - name: Smoke-test the rendered charts
         run: |

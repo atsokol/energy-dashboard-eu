@@ -22,5 +22,5 @@ Country, period type, month and year choices carry across pages and visits.
 
 ## Data updates
 
-Rebuilt daily after the day-ahead auction. Hourly load and generation are downloaded in full once,
+Rebuilt weekly, on Mondays after the day-ahead auction. Hourly load and generation are downloaded in full once,
 then only the latest weeks.
