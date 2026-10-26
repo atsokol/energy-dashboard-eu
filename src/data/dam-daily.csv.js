@@ -17,7 +17,10 @@ process.stdout.write(
     for (const zone of ZONE_KEYS) {
       for (const d of dailyMetrics(normaliseHourly(raw.get(zone), zone))) {
         if (d.date < START_DATE) continue;
-        rows.push({zone, date: d.date, avg: round(d.avg), tb1: round(d.tb1), tb2: round(d.tb2), tb4: round(d.tb4), hours: d.hours});
+        rows.push({
+          zone, date: d.date, avg: round(d.avg), tb1: round(d.tb1), tb2: round(d.tb2), tb4: round(d.tb4), hours: d.hours,
+          neg_hours: d.neg_hours, neg_value: round(d.neg_value)
+        });
       }
     }
     // Guard against a truncated upstream response replacing a good cache: 18 zones × ~5.8 years.

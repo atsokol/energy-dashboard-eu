@@ -3,7 +3,7 @@
 //
 // Pure functions over plain arrays — no d3, no Plot — so a loader can import this file directly.
 
-import {zoneByKey} from "./zones.js";
+import {START_DATE, zoneByKey} from "./zones.js";
 
 // ---------------------------------------------------------------------------------------------
 // Currency
@@ -110,6 +110,11 @@ const mean = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length;
  * cycle a day, before losses. It is computed on hourly prices throughout: since SDAC moved to
  * 15-minute products (Oct 2025) the hourly figure is the mean of four quarter-hours, which keeps
  * 2021-2025 and 2026 on one basis but understates what a quarter-hour-dispatched battery sees.
+ *
+ * `neg_hours` counts the day's hours with a price below zero and `neg_value` sums those prices
+ * over one hour each (EUR/MW, ≤ 0): the cost of taking 1 MW of output through every negative
+ * hour. Both are on hourly prices too, so a negative quarter-hour inside a positive hour is not
+ * counted.
  */
 export function dailyMetrics(hourly) {
   const days = new Map();
@@ -122,7 +127,11 @@ export function dailyMetrics(hourly) {
   for (const [date, prices] of days) {
     if (prices.length < MIN_HOURS_PER_DAY) continue;
     const sorted = [...prices].sort((a, b) => a - b);
-    const row = {date, avg: mean(prices), hours: prices.length};
+    const negative = prices.filter((p) => p < 0);
+    const row = {
+      date, avg: mean(prices), hours: prices.length,
+      neg_hours: negative.length, neg_value: negative.reduce((s, p) => s + p, 0)
+    };
     for (const x of TB_DURATIONS) row[`tb${x}`] = mean(sorted.slice(-x)) - mean(sorted.slice(0, x));
     out.push(row);
   }
@@ -169,6 +178,7 @@ export function hourlyQuantiles(hourly) {
 
 const iso = (d) => d.toISOString().slice(0, 10);
 const addDays = (s, n) => iso(new Date(Date.parse(s) + n * 86_400_000));
+const fmtDate = (s, opts) => new Date(s + "T00:00:00Z").toLocaleDateString("en-GB", {timeZone: "UTC", ...opts});
 
 /**
  * The market day the maps anchor on: the latest day every reasonably current zone has published.
@@ -183,51 +193,95 @@ export function anchorDay(daily) {
   return current.sort()[0];
 }
 
+// Per period kind: the start of the period containing a date, the start `n` periods later, and a
+// display label. Weeks are ISO weeks (Mon-Sun).
+const PERIOD_KINDS = {
+  year: {
+    floor: (s) => `${s.slice(0, 4)}-01-01`,
+    offset: (s, n) => `${+s.slice(0, 4) + n}-01-01`,
+    label: (s) => s.slice(0, 4)
+  },
+  month: {
+    floor: (s) => `${s.slice(0, 7)}-01`,
+    offset: (s, n) => iso(new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1 + n, 1))),
+    label: (s) => fmtDate(s, {month: "long", year: "numeric"})
+  },
+  week: {
+    floor: (s) => addDays(s, -((new Date(s + "T00:00:00Z").getUTCDay() + 6) % 7)),
+    offset: (s, n) => addDays(s, 7 * n),
+    label: (s) => `Week of ${fmtDate(s, {day: "numeric", month: "short", year: "numeric"})}`
+  },
+  day: {
+    floor: (s) => s,
+    offset: addDays,
+    label: (s) => fmtDate(s, {weekday: "short", day: "numeric", month: "short", year: "numeric"})
+  }
+};
+
 /**
- * The last *complete* year, month, ISO week (Mon-Sun) and day ending on or before `anchor`.
- * Each is {key, label, start, end} with `end` exclusive, all as "YYYY-MM-DD".
+ * Every period of `kind` ("year" | "month" | "week" | "day") from `from` to `anchor`, newest
+ * first. Each is {key, label, start, end, partial} with `end` exclusive, all as "YYYY-MM-DD";
+ * `key` is the start date. The period still in progress on `anchor` comes first, cut off after
+ * `anchor` and marked `partial`, so its coverage is judged against the days elapsed.
  */
-export function lastFullPeriods(anchor) {
-  const a = new Date(anchor + "T00:00:00Z");
-  const next = addDays(anchor, 1); // first day NOT yet complete
-  const y = a.getUTCFullYear(), m = a.getUTCMonth();
-
-  const yearEnd = next.slice(5) === "01-01" ? next : `${y}-01-01`;
-  const yearStart = `${+yearEnd.slice(0, 4) - 1}-01-01`;
-
-  const monthEnd = next.slice(8) === "01" ? next : iso(new Date(Date.UTC(y, m, 1)));
-  const monthStart = iso(new Date(Date.UTC(+monthEnd.slice(0, 4), +monthEnd.slice(5, 7) - 2, 1)));
-
-  const dow = (new Date(next + "T00:00:00Z").getUTCDay() + 6) % 7; // 0 = Monday
-  const weekEnd = addDays(next, -dow);
-  const weekStart = addDays(weekEnd, -7);
-
-  const fmt = (s, opts) => new Date(s + "T00:00:00Z").toLocaleDateString("en-GB", {timeZone: "UTC", ...opts});
-  return [
-    {key: "year", label: `Year ${yearStart.slice(0, 4)}`, start: yearStart, end: yearEnd},
-    {key: "month", label: fmt(monthStart, {month: "long", year: "numeric"}), start: monthStart, end: monthEnd},
-    {key: "week", label: `Week of ${fmt(weekStart, {day: "numeric", month: "short", year: "numeric"})}`, start: weekStart, end: weekEnd},
-    {key: "day", label: fmt(anchor, {weekday: "short", day: "numeric", month: "short", year: "numeric"}), start: anchor, end: next}
-  ];
+export function listPeriods(kind, anchor, from = START_DATE) {
+  const {floor, offset, label} = PERIOD_KINDS[kind];
+  const out = [];
+  const next = addDays(anchor, 1);
+  let end = floor(next); // start of the first period not yet complete
+  if (end < next && end >= from) {
+    const to = fmtDate(anchor, {day: "numeric", month: "short"});
+    out.push({key: end, label: `${label(end)} (to ${to})`, start: end, end: next, partial: true});
+  }
+  for (let start = offset(end, -1); start >= from; end = start, start = offset(end, -1)) {
+    out.push({key: start, label: label(start), start, end, partial: false});
+  }
+  return out;
 }
 
 /**
- * Per-zone mean of `field` over [start, end). `weight` (e.g. "hours") makes it hour-weighted.
- * A zone needs at least 80% of the period's days, so a part-covered period never reads as a full one.
+ * Per-zone mean of `field` in each of `periods` (all of one `kind`), in one pass over `daily`.
+ * Returns a Map from period key to [{zone, value, days}]. `weight` (e.g. "hours") makes the mean
+ * hour-weighted. A zone needs at least 80% of a period's days, so a part-covered period never
+ * reads as a full one.
  */
-export function periodMeans(daily, field, {start, end}, weight) {
-  const days = Math.round((Date.parse(end) - Date.parse(start)) / 86_400_000);
+export function periodMeans(daily, field, kind, periods, weight) {
+  const {floor} = PERIOD_KINDS[kind];
+  const byKey = new Map(periods.map((p) => [p.key, p]));
   const acc = new Map();
   for (const d of daily) {
-    if (d.date < start || d.date >= end || !Number.isFinite(d[field])) continue;
-    let a = acc.get(d.zone);
-    if (!a) acc.set(d.zone, (a = {sum: 0, w: 0, n: 0}));
+    if (!Number.isFinite(d[field])) continue;
+    const key = floor(d.date);
+    // A partial period ends at the anchor; days a zone has already published beyond it stay out.
+    if (!byKey.has(key) || d.date >= byKey.get(key).end) continue;
+    const id = `${key}|${d.zone}`;
+    let a = acc.get(id);
+    if (!a) acc.set(id, (a = {sum: 0, w: 0, n: 0}));
     const w = weight ? d[weight] : 1;
     a.sum += d[field] * w; a.w += w; a.n += 1;
   }
-  return [...acc]
-    .filter(([, a]) => a.n >= Math.ceil(days * 0.8))
-    .map(([zone, a]) => ({zone, value: a.sum / a.w, days: a.n}));
+  const out = new Map(periods.map((p) => [p.key, []]));
+  for (const [id, a] of acc) {
+    const [key, zone] = id.split("|");
+    const {start, end} = byKey.get(key);
+    const days = Math.round((Date.parse(end) - Date.parse(start)) / 86_400_000);
+    if (a.n >= Math.ceil(days * 0.8)) out.get(key).push({zone, value: a.sum / a.w, days: a.n});
+  }
+  return out;
+}
+
+/**
+ * A colour domain shared by every complete period in `byPeriod` (the output of periodMeans for
+ * `periods`), so switching between periods never rescales the map, and the period in progress
+ * cannot shift it from one day to the next. The P2-P98 range of all zone-period values keeps a few
+ * extreme periods (the 2022 price spike, single-day outliers) from washing out the rest; values
+ * beyond it take the end colours.
+ */
+export function stableDomain(byPeriod, periods, lo = 0.02, hi = 0.98) {
+  const sorted = periods.filter((p) => !p.partial).flatMap((p) => byPeriod.get(p.key).map((d) => d.value)).sort((a, b) => a - b);
+  if (!sorted.length) return [0, 1];
+  const domain = [quantileSorted(sorted, lo), quantileSorted(sorted, hi)];
+  return domain[0] === domain[1] ? [domain[0] - 1, domain[1] + 1] : domain;
 }
 
 /** Per zone and calendar month: hour-weighted average price, months with ≥ 80% of days only. */
@@ -273,6 +327,22 @@ export function rollingMeans(daily, field, window = 30) {
       const n = hi - lo + 1;
       if (n >= Math.ceil(window * 2 / 3)) out.push({zone, date: xs[hi].date, value: xs[hi][field], ma: sum / n});
     }
+  }
+  return out;
+}
+
+/**
+ * Running total of `field` through each calendar year, per day: {year, day: "MM-DD", value}.
+ * Years start from zero on 1 January, so they compare as cumulative curves on one Jan-Dec axis.
+ */
+export function cumulativeByYear(daily, field) {
+  const out = [];
+  let year = null, sum = 0;
+  for (const d of [...daily].sort((a, b) => (a.date < b.date ? -1 : 1))) {
+    if (!Number.isFinite(d[field])) continue;
+    if (d.date.slice(0, 4) !== year) [year, sum] = [d.date.slice(0, 4), 0];
+    sum += d[field];
+    out.push({year, day: d.date.slice(5), value: sum});
   }
   return out;
 }

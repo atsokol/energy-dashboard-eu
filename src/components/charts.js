@@ -4,6 +4,7 @@
 // they are page globals, and the smoke-test harness supplies its own copies.
 
 import {timeAxis} from "./axes.js";
+import {GEN_GROUPS, completeGrid, genGroupByKey, SEASONS} from "./gen.js";
 import {multiSeriesTip} from "./tooltips.js";
 import {ZONES, zoneByIso, zoneByKey} from "./zones.js";
 
@@ -39,6 +40,11 @@ export function seriesColors(keys) {
 // Slovenia's and Croatia's collide at their shared border).
 const LABEL_AT = {SI: [14.4, 46.2], HR: [17.0, 45.45], GR: [22.2, 39.6], DE_LU: [10.3, 51.0]};
 
+/** [lon, lat] to label (or place a symbol on) zone `z`, given the map's in-scope features. */
+function zoneAnchor(d3, inScope, z) {
+  return LABEL_AT[z.key] ?? d3.geoCentroid(inScope.find((f) => f.properties.id === z.iso[0]));
+}
+
 /**
  * Nudge end-of-line labels apart vertically so none sit closer than `gap` px, working in data
  * units via the plot's own vertical scale factor. Returns copies with `labelY` set.
@@ -58,8 +64,10 @@ const fmt1 = (x) => x.toFixed(1);
 /**
  * Choropleth of one value per zone. Returns the Plot figure; its `value` is the hovered zone's
  * key (or null), which the pages use to make a click on the map select that country.
+ * `domain` fixes the colour scale (values outside it clamp to the end colours); without it the
+ * scale spans this map's own values.
  */
-export function zoneMap({d3, Plot, geo, values, selected, width, title, subtitle, label, format = fmt1}) {
+export function zoneMap({d3, Plot, geo, values, selected, width, title, subtitle, label, domain, format = fmt1}) {
   const byZone = new Map(values.map((d) => [d.zone, d.value]));
   const inScope = geo.features.filter((f) => zoneByIso.has(f.properties.id));
   const context = geo.features.filter((f) => !zoneByIso.has(f.properties.id));
@@ -68,8 +76,7 @@ export function zoneMap({d3, Plot, geo, values, selected, width, title, subtitle
   const missing = inScope.filter((f) => !byZone.has(zoneOf(f)));
 
   const labels = ZONES.map((z) => {
-    const feature = inScope.find((f) => f.properties.id === z.iso[0]);
-    const [lon, lat] = LABEL_AT[z.key] ?? d3.geoCentroid(feature);
+    const [lon, lat] = zoneAnchor(d3, inScope, z);
     const v = byZone.get(z.key);
     return {zone: z.key, lon, lat, text: `${z.short}\n${v === undefined ? "n/a" : format(v)}`, dark: v !== undefined};
   });
@@ -82,8 +89,8 @@ export function zoneMap({d3, Plot, geo, values, selected, width, title, subtitle
     height: Math.round(Math.min(w * 0.95, 680)),
     projection: {type: "conic-equal-area", parallels: [40, 58], rotate: [-18, 0], domain: {type: "FeatureCollection", features: inScope}, inset: 6},
     color: {
-      type: "linear", legend: true, label,
-      domain: extent[0] === extent[1] ? [extent[0] - 1, extent[1] + 1] : extent,
+      type: "linear", legend: true, label, clamp: true,
+      domain: domain ?? (extent[0] === extent[1] ? [extent[0] - 1, extent[1] + 1] : extent),
       interpolate: d3.piecewise(d3.interpolateLab, RAMP)
     },
     marks: [
@@ -115,9 +122,9 @@ export const zoneOfFeature = (f) => zoneByIso.get(f?.properties?.id)?.key ?? nul
  * control: an Inputs.select takes the zone; with `toggle`, an Inputs.checkbox adds or removes it.
  * Returns the map for use as a display expression.
  */
-export function linkMapToInput(map, input, {toggle = false} = {}) {
+export function linkMapToInput(map, input, {toggle = false, zoneOf = zoneOfFeature} = {}) {
   map.addEventListener("click", () => {
-    const zone = zoneOfFeature(map.value);
+    const zone = zoneOf(map.value);
     if (!zone) return;
     if (toggle) {
       input.value = input.value.includes(zone) ? input.value.filter((z) => z !== zone) : [...input.value, zone];
@@ -211,6 +218,259 @@ export function spreadLines({d3, Plot, rows, tb, window, width}) {
       }),
       Plot.ruleX(data, Plot.pointerX(Plot.binX({x: "min"}, {x: "date", interval: d3.utcDay, insetTop: 20}))),
       Plot.tip(data, Plot.pointerX(Plot.binX({title: (v) => v, x: "min"}, {x: "date", interval: d3.utcDay, render})))
+    ]
+  });
+}
+
+/**
+ * One running-total line per calendar year on a shared Jan-Dec axis (rows from cumulativeByYear),
+ * with the latest year drawn heavier. Days are placed on leap year 2000 so 29 February has a slot.
+ */
+export function cumulativeYearChart({d3, Plot, rows, width, title, subtitle, label, format = d3.format(",.0f")}) {
+  const data = rows.map((d) => ({...d, date: new Date(`2000-${d.day}T00:00:00Z`)}));
+  const years = [...new Set(data.map((d) => d.year))].sort();
+  const latest = years.at(-1);
+  const render = multiSeriesTip(d3, Plot, {y: "year", value: "value", valueFormat: format, header: (d) => d3.utcFormat("%e %b")(d.date), width: 150});
+  return Plot.plot({
+    title, subtitle, caption: SOURCE,
+    width: Math.min(width, 800), height: 320, marginLeft: 55, marginRight: 30,
+    x: {line: true, label: null, ticks: d3.utcMonth.every(width < 500 ? 2 : 1), tickFormat: d3.utcFormat("%b")},
+    y: {grid: true, nice: true, label, tickFormat: format},
+    color: {legend: true, domain: years, range: years.map((_, i) => CATEGORICAL[i % CATEGORICAL.length])},
+    marks: [
+      Plot.ruleY([0]),
+      Plot.lineY(data, {
+        x: "date", y: "value", stroke: "year", curve: "step-after",
+        strokeWidth: (d) => (d.year === latest ? 2.5 : 1.5)
+      }),
+      Plot.ruleX(data, Plot.pointerX(Plot.binX({x: "min"}, {x: "date", interval: d3.utcDay, insetTop: 20}))),
+      Plot.tip(data, Plot.pointerX(Plot.binX({title: (v) => v, x: "min"}, {x: "date", interval: d3.utcDay, render})))
+    ]
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Generation mix
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Plot colour scale for the generation groups. The values are CSS custom properties (style.css),
+ * so dark mode swaps in its own validated steps without re-rendering.
+ */
+export const GEN_COLORS = {
+  domain: GEN_GROUPS.map((g) => g.label),
+  range: GEN_GROUPS.map((g) => `var(--gen-${g.key})`)
+};
+
+const genLabel = (key) => genGroupByKey.get(key).label;
+const pct = (x) => (x == null ? undefined : `${Math.round(x * 100)}%`);
+
+/**
+ * Energy unit for a series whose largest value is `max` GWh: TWh for national-scale systems,
+ * GWh for the smallest, so the axis never reads 0.1-0.4 TWh or 40,000 GWh. `format` is for
+ * tooltips and labels, precise enough that a minor type's slice does not read as 0.0.
+ */
+function energyUnit(max) {
+  return max >= 1000 ? {label: "TWh", k: 1000, format: (x) => x.toFixed(x < 10 ? 2 : 1)} : {label: "GWh", k: 1, format: (x) => x.toFixed(0)};
+}
+
+/** Power unit for a series whose largest value is `max` MW (see energyUnit). */
+function powerUnit(max) {
+  return max >= 1000 ? {label: "GW", k: 1000, format: (x) => x.toFixed(x < 10 ? 2 : 1)} : {label: "MW", k: 1, format: (x) => x.toFixed(0)};
+}
+
+// Donut sizes on the mix map: the largest system's outer radius as a share of the map width, and
+// a floor so the smallest systems (≈ 2 TWh against Germany's ≈ 440) stay visible and hoverable.
+const DONUT_MAX_R = 0.065;
+const DONUT_MIN_R = 7;
+
+/**
+ * One donut per zone at its label anchor: slices are the zone's generation mix over the year, and
+ * the donut's area is proportional to its total generation (above a minimum size). Returns the
+ * Plot figure; its `value` is the hovered zone's row ({zone, …}) or null.
+ * `mix` is annualMix output: [{zone, total (GWh), mix: Map(group → GWh)}].
+ */
+export function mixMap({d3, Plot, geo, mix, selected, width, year}) {
+  const byZone = new Map(mix.map((d) => [d.zone, d]));
+  const inScope = geo.features.filter((f) => zoneByIso.has(f.properties.id));
+  const context = geo.features.filter((f) => !zoneByIso.has(f.properties.id));
+  const zoneOf = (f) => zoneByIso.get(f.properties.id).key;
+  const w = Math.min(width, 800);
+  const maxR = Math.max(28, w * DONUT_MAX_R);
+
+  // Biggest first, so smaller donuts overlapping a neighbour are drawn on top of it.
+  const points = ZONES.filter((z) => byZone.has(z.key))
+    .map((z) => {
+      const [lon, lat] = zoneAnchor(d3, inScope, z);
+      const {total, mix: groups} = byZone.get(z.key);
+      const share = Object.fromEntries(GEN_GROUPS.map((g) => [g.key, (groups.get(g.key) ?? 0) / total]));
+      return {zone: z.key, name: z.name, short: z.short, lon, lat, twh: total / 1000, share};
+    })
+    .sort((a, b) => b.twh - a.twh);
+  const missing = ZONES.filter((z) => !byZone.has(z.key)).map((z) => {
+    const [lon, lat] = zoneAnchor(d3, inScope, z);
+    return {zone: z.key, lon, lat, text: `${z.short}\nn/a`};
+  });
+
+  const fontSize = w < 500 ? 8 : 10;
+  const radius = (r) => Math.max(DONUT_MIN_R, r);
+
+  function donuts(index, scales, values, dimensions) {
+    const g = d3.create("svg:g");
+    const pie = d3.pie().sort(null).value((d) => d.share);
+    for (const i of index) {
+      const p = points[i];
+      const r = radius(values.r[i]);
+      const slices = pie(GEN_GROUPS.map((group) => ({group, share: p.share[group.key]}))).filter((s) => s.data.share > 0);
+      const arc = d3.arc().innerRadius(r * 0.5).outerRadius(r);
+      const gi = g.append("g").attr("transform", `translate(${values.x[i]},${values.y[i]})`);
+      // A surface disc separates overlapping neighbours; the selected zone also gets an ink ring.
+      gi.append("circle").attr("r", r + 2).attr("fill", "var(--theme-background)");
+      if (p.zone === selected) gi.append("circle").attr("r", r + 3).attr("fill", "none").attr("stroke", "currentColor").attr("stroke-width", 2);
+      gi.selectAll("path").data(slices).join("path")
+        .attr("d", arc)
+        .attr("fill", (d) => `var(--gen-${d.data.group.key})`)
+        .attr("stroke", "var(--theme-background)")
+        .attr("stroke-width", r > 14 ? 1 : 0.5);
+      gi.append("text")
+        .attr("y", -r - 5).attr("text-anchor", "middle").attr("font-size", fontSize)
+        .attr("font-weight", p.zone === selected ? "bold" : "normal")
+        .attr("fill", "var(--theme-foreground)").attr("stroke", "var(--theme-background)")
+        .attr("stroke-width", 3).attr("paint-order", "stroke")
+        .text(p.short);
+    }
+    // Size key: two reference donuts' outlines in the lower-left corner.
+    const refs = [100, 10].filter((v) => scales.r(v) >= DONUT_MIN_R);
+    const big = scales.r(refs[0] ?? 10);
+    const key = g.append("g").attr("transform", `translate(${dimensions.marginLeft + big + 8},${dimensions.height - dimensions.marginBottom - 8})`)
+      .attr("fill", "none").attr("stroke", "var(--theme-foreground-muted)");
+    for (const v of refs) {
+      const r = scales.r(v);
+      key.append("circle").attr("cy", -r).attr("r", r);
+      key.append("text").attr("x", big + 6).attr("y", -2 * r + 4).attr("stroke", "none").attr("text-anchor", "start")
+        .attr("fill", "var(--theme-foreground-muted)").attr("font-size", fontSize).text(`${v} TWh`);
+    }
+    return g.node();
+  }
+
+  const plot = Plot.plot({
+    title: `Generation mix — ${year}`,
+    subtitle: "Share of each type in the year's generation; donut area proportional to the zone's total generation",
+    caption: SOURCE,
+    width: w,
+    height: Math.round(Math.min(w * 0.95, 680)),
+    projection: {type: "conic-equal-area", parallels: [40, 58], rotate: [-18, 0], domain: {type: "FeatureCollection", features: inScope}, inset: 6},
+    r: {domain: [0, d3.max(points, (d) => d.twh) ?? 1], range: [0, maxR]},
+    color: {legend: true, ...GEN_COLORS},
+    marks: [
+      Plot.geo(context, {fill: "var(--theme-foreground-faintest)", stroke: "var(--theme-background)", strokeWidth: 0.5, clip: "frame"}),
+      Plot.geo(inScope, {fill: "var(--theme-background-alt)", stroke: "var(--theme-foreground-muted)", strokeWidth: 0.5}),
+      Plot.geo(inScope.filter((f) => zoneOf(f) === selected), {stroke: "currentColor", strokeWidth: 2}),
+      Plot.dot(points, {x: "lon", y: "lat", r: "twh", render: donuts}),
+      Plot.text(missing, {
+        x: "lon", y: "lat", text: "text", fontSize, lineHeight: 1.1,
+        fill: "var(--theme-foreground-muted)", stroke: "var(--theme-background)", strokeWidth: 3, paintOrder: "stroke"
+      }),
+      // Invisible hover layer: the pointer target and tooltip for each donut, at least the
+      // minimum donut size. Its constant fill binds the colour scale, so the legend lists every type.
+      Plot.dot(points, {
+        x: "lon", y: "lat", r: "twh", fill: () => GEN_GROUPS[0].label, fillOpacity: 0,
+        channels: {
+          Country: "name",
+          "Generation, TWh": "twh",
+          ...Object.fromEntries(GEN_GROUPS.map((g) => [g.label, (d) => (d.share[g.key] > 0 ? d.share[g.key] : null)]))
+        },
+        // Key order here is the tooltip's row order.
+        tip: {format: {Country: true, x: false, y: false, r: false, fill: false, "Generation, TWh": (x) => x.toFixed(1), ...Object.fromEntries(GEN_GROUPS.map((g) => [g.label, pct]))}}
+      })
+    ]
+  });
+  plot.style.cursor = "pointer";
+  return plot;
+}
+
+/**
+ * Monthly generation by type for one zone, stacked. `rows`: [{month, group, gwh}] for the zone.
+ */
+export function generationAreaChart({d3, Plot, rows, zone, width, height = 320}) {
+  const unit = energyUnit(d3.max(d3.rollups(rows, (v) => d3.sum(v, (d) => d.gwh), (d) => d.month), ([, v]) => v) ?? 0);
+  const data = completeGrid(rows, (d) => d.month, "gwh")
+    .map((d) => ({date: new Date(d.month + "T00:00:00Z"), label: genLabel(d.group), value: d.gwh / unit.k}));
+  const render = multiSeriesTip(d3, Plot, {y: "label", value: "value", valueFormat: unit.format, header: (d) => d3.utcFormat("%B %Y")(d.date), width: 190});
+  return Plot.plot({
+    title: `Monthly generation by type — ${zoneByKey.get(zone).name}`,
+    subtitle: `Actual generation per calendar month, ${unit.label}`,
+    caption: SOURCE,
+    width, height, marginLeft: 45, marginRight: 15,
+    x: timeAxis(width, d3),
+    y: {grid: true, nice: true, label: unit.label},
+    color: GEN_COLORS, // legend shared with capacityChart, drawn by the page above both
+    marks: [
+      Plot.areaY(data, {x: "date", y: "value", fill: "label", order: GEN_COLORS.domain, stroke: "var(--theme-background)", strokeWidth: 0.75}),
+      Plot.ruleY([0]),
+      Plot.ruleX(data, Plot.pointerX(Plot.binX({x: "min"}, {x: "date", interval: d3.utcMonth, insetTop: 20}))),
+      Plot.tip(data, Plot.pointerX(Plot.binX({title: (v) => v, x: "min"}, {x: "date", interval: d3.utcMonth, render})))
+    ]
+  });
+}
+
+/**
+ * Installed capacity by type for one zone, one stacked column per annual snapshot given, total on
+ * top. `rows`: [{year, group, mw}] for the zone.
+ */
+export function capacityChart({d3, Plot, rows, zone, width, height = 320}) {
+  const totals = d3.rollups(rows, (v) => d3.sum(v, (d) => d.mw), (d) => d.year).map(([year, mw]) => ({year, mw}));
+  const unit = powerUnit(d3.max(totals, (d) => d.mw) ?? 0);
+  const data = rows.map((d) => ({year: d.year, label: genLabel(d.group), value: d.mw / unit.k}));
+  return Plot.plot({
+    title: totals.length === 1 ? `Installed capacity, ${totals[0].year}` : "Installed capacity",
+    subtitle: `ENTSO-E annual snapshot, ${unit.label}`,
+    width, height, marginLeft: 45, marginRight: 10,
+    // A lone column at the default padding would be a slab two-thirds of the panel wide.
+    x: {label: null, type: "band", padding: totals.length === 1 ? 0.5 : 0.25},
+    y: {grid: true, nice: true, label: unit.label},
+    color: GEN_COLORS,
+    marks: [
+      Plot.barY(data, {
+        x: "year", y: "value", fill: "label", order: GEN_COLORS.domain,
+        stroke: "var(--theme-background)", strokeWidth: 1,
+        tip: {format: {x: true, y: unit.format, fill: true}}
+      }),
+      Plot.ruleY([0]),
+      Plot.text(totals, {
+        x: "year", y: (d) => d.mw / unit.k, text: (d) => unit.format(d.mw / unit.k), dy: -7,
+        fill: "var(--theme-foreground)", fontSize: 10
+      })
+    ]
+  });
+}
+
+/**
+ * Average generation by type and local hour of day, one stacked panel per season (2 × 2), all on
+ * one y scale. `rows`: [{season, hour, group, mw}] for the zone and year.
+ */
+export function seasonalProfileChart({d3, Plot, rows, zone, year, width}) {
+  const unit = powerUnit(d3.max(d3.rollups(rows, (v) => d3.sum(v, (d) => d.mw), (d) => d.season, (d) => d.hour).flatMap(([, hs]) => hs), ([, v]) => v) ?? 0);
+  const pos = new Map(SEASONS.map((s, i) => [s.key, {col: i % 2, row: Math.floor(i / 2), name: s.label}]));
+  const data = completeGrid(rows, (d) => `${d.season}|${d.hour}`, "mw")
+    .map((d) => ({...pos.get(d.season), hour: d.hour, label: genLabel(d.group), value: d.mw / unit.k}));
+  const render = multiSeriesTip(d3, Plot, {y: "label", value: "value", valueFormat: unit.format, header: (d) => `${d.name}, ${String(d.hour).padStart(2, "0")}:00`, width: 180});
+  const w = Math.min(width, 800);
+  return Plot.plot({
+    title: `Typical day by season — ${zoneByKey.get(zone).name}, ${year}`,
+    subtitle: `Average generation by type and local hour of day, ${unit.label}. Winter is January, February and December of ${year}`,
+    caption: SOURCE,
+    width: w, height: 60 + 2 * (w < 500 ? 170 : 210), marginLeft: 45, marginRight: 15,
+    x: {label: "hour of day", domain: [0, 23], ticks: [0, 6, 12, 18, 23], line: true},
+    y: {grid: true, nice: true, label: unit.label},
+    fx: {axis: null}, fy: {axis: null},
+    color: {legend: true, ...GEN_COLORS},
+    marks: [
+      Plot.areaY(data, {x: "hour", y: "value", fx: "col", fy: "row", fill: "label", order: GEN_COLORS.domain, stroke: "var(--theme-background)", strokeWidth: 0.75}),
+      Plot.ruleY([0]),
+      Plot.text(SEASONS.map((s) => pos.get(s.key)), {fx: "col", fy: "row", text: "name", frameAnchor: "top-left", dx: 4, dy: 2, fontWeight: "bold"}),
+      Plot.ruleX(data, Plot.pointerX(Plot.binX({x: "min"}, {x: "hour", fx: "col", fy: "row", interval: 1, insetTop: 20}))),
+      Plot.tip(data, Plot.pointerX(Plot.binX({title: (v) => v, x: "min"}, {x: "hour", fx: "col", fy: "row", interval: 1, render})))
     ]
   });
 }

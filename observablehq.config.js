@@ -6,7 +6,8 @@ export default {
   // array — it drives the left sidebar nav.
   pages: [
     {name: "Day-ahead prices", path: "/prices"},
-    {name: "Day-ahead spreads", path: "/spreads"}
+    {name: "Day-ahead spreads", path: "/spreads"},
+    {name: "Generation mix", path: "/generation"}
   ],
   footer: "Built with Observable Framework. Data: ENTSO-E Transparency Platform via entsoemcp.com."
 };

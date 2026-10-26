@@ -19,3 +19,34 @@
 #observablehq-main ul {
   max-width: 800px;
 }
+
+/* Generation-mix colours (charts.js GEN_COLORS), one token per group, in the energy-industry
+   convention: brown coal, orange gas, light-blue hydro, blue wind, green biomass/RES, yellow
+   solar, violet nuclear, grey "Other". Shades were validated (dataviz validate_palette.js) in the
+   stacking order of GEN_GROUPS (nuclear, coal, hydro, gas, wind, bio, solar): every adjacent pair
+   clears the CVD floor, worst ΔE 9.7 light / 7.6 dark (solar-bio, legal with the surface gaps,
+   legend and tooltips the charts carry). Light hydro and solar are below 3:1 on the light
+   surface, so they rely on the same legend and tooltips. Reordering GEN_GROUPS needs a
+   re-validation. */
+:root {
+  --gen-nuclear: #6250d6;
+  --gen-coal: #9c5b2e;
+  --gen-hydro: #6aaee8;
+  --gen-gas: #eb6834;
+  --gen-wind: #2a5fb0;
+  --gen-bio: #1f9e5a;
+  --gen-solar: #eda100;
+  --gen-other: #898781;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --gen-nuclear: #9085e9;
+    --gen-coal: #b8784a;
+    --gen-hydro: #5b9bd0;
+    --gen-gas: #d95926;
+    --gen-wind: #4f80d6;
+    --gen-bio: #2aa865;
+    --gen-solar: #c98500;
+  }
+}

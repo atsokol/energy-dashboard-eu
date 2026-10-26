@@ -87,12 +87,18 @@ dom.window.HTMLCanvasElement.prototype.toDataURL = () => "data:image/png;base64,
 
 // Framework globals, stubbed to the values a page sees on first render.
 globalThis.width = Number(process.env.HARNESS_WIDTH ?? 800);
+// Like Framework's html, a DOM node interpolated into the template is inserted as itself.
 globalThis.html = (strings, ...values) => {
   const t = dom.window.document.createElement("template");
-  t.innerHTML = String.raw({raw: strings}, ...values);
+  const nodes = [];
+  t.innerHTML = String.raw({raw: strings}, ...values.map((v) =>
+    v instanceof dom.window.Node ? '<template data-slot="' + (nodes.push(v) - 1) + '"></template>' : v
+  ));
+  for (const slot of t.content.querySelectorAll("template[data-slot]")) slot.replaceWith(nodes[+slot.dataset.slot]);
   return t.content.firstElementChild ?? t.content;
 };
 const view = (input) => input.value;
+const Generators = {input: (input) => input.value};
 const Inputs = {
   date: ({value}) => ({value}),
   range: (domain, {value} = {}) => ({value}),

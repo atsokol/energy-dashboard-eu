@@ -10,10 +10,17 @@ fallback, shared client modules in `src/components/`, a jsdom smoke test gating 
 
 ## Pages
 
-- **Day-ahead prices** (`/prices`): price map (last full year / month / week / day), monthly
-  average price and intraday P10/P50/P90 by year for a selected country.
-- **Day-ahead spreads** (`/spreads`): TB1/2/4 map (year / month / week) and a 30-day
-  moving-average comparison across countries.
+- **Day-ahead prices** (`/prices`): price map (any year / month / week / day since 2021, the
+  current one to date), monthly average price (from a chosen start year) and intraday P10/P50/P90
+  by year for a selected country.
+- **Day-ahead spreads** (`/spreads`): TB1/2/4 map (any year / month / week, the current one to
+  date) and a 30-day moving-average comparison across countries.
+- **Generation mix** (`/generation`): donut map of each zone's mix in the last full year (area ∝
+  total generation), monthly generation by type beside the latest installed-capacity snapshot, and average
+  hourly generation by season (winter/spring/summer/autumn) for a selected country.
+
+Map colour scales are fixed per period type (P2-P98 of all zone-period values, clamped), so
+colours compare across periods.
 
 Clicking a country on a map selects it (prices) or adds/removes it from the comparison (spreads).
 
@@ -25,6 +32,13 @@ and reduce them to `dam-daily.csv` (zone × day: average, TB1, TB2, TB4) and `da
 (zone × year × hour: P10/P50/P90). Pages load ~580 KB of gzipped static files and are ready in
 about 0.2 s. If entsoemcp.com is down or rate-limits the build, loaders serve the last snapshot
 committed in `cache/`, so the build still succeeds.
+
+Generation uses three more loaders: `gen-monthly.csv` (zone × month × group, GWh, from one
+monthly-aggregated `generation_per_type` call per zone), `gen-capacity.csv` (zone × year × group,
+MW, from `installed_generation_capacity`) and `gen-profiles.csv` (zone × season × local hour ×
+group, mean MW, for the last full year). The profiles need a year of hourly data (~60 MB across
+all zones, ~30 s), so that loader reuses its cached snapshot while it is still for the right year
+and only downloads again in January.
 
 A browser-side live fetch was prototyped and dropped: it took 4–31 s per page, and entsoemcp.com
 sends no CORS headers and rate-limits per IP (HTTP 429, ~35 s Retry-After).
@@ -63,3 +77,14 @@ node test/serve-dist.mjs   # serve the built dist/ like GitHub Pages (gzip) on :
   could capture.
 - **Coverage rule**: a map shows a zone for a period only if ≥ 80% of the period's days are
   present. Monthly series require ≥ 80% of the month.
+- **Generation groups**: the ENTSO-E production types fold into eight groups (`GEN_GROUPS` in
+  `src/components/gen.js`): nuclear; coal & lignite (+ coal gas, oil shale, peat); gas; hydro
+  (+ pumped-storage output, not pumping); wind; biomass & other RES (biomass, waste, geothermal,
+  other renewable); solar; other (oil, batteries, other). Monthly GWh = monthly mean MW × days ×
+  24, local months, the month in progress dropped. AL has generation data only from 2026, so it is
+  absent from the 2025 map and profiles.
+- **Capacity**: the page shows each zone's latest annual snapshot. ENTSO-E has snapshots for most
+  zones only from 2025 (DE-LU and PL earlier); the loader keeps them all.
+- **Generation colours**: CSS tokens `--gen-*` in `src/style.css` (brown coal, orange gas, light-blue
+  hydro, blue wind, green biomass/RES, yellow solar, violet nuclear), light and dark shades
+  validated for colour-vision separation in the stacking order of `GEN_GROUPS`.

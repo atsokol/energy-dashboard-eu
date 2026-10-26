@@ -16,7 +16,7 @@ dispatch can capture.
 
 ```js
 import {ZONES} from "./components/zones.js"
-import {anchorDay, lastFullPeriods, periodMeans, rollingMeans} from "./components/dam.js"
+import {anchorDay, listPeriods, periodMeans, rollingMeans, stableDomain} from "./components/dam.js"
 import {linkMapToInput, spreadLines, zoneMap} from "./components/charts.js"
 ```
 
@@ -28,7 +28,7 @@ const geo = await FileAttachment("./data/europe.geo.json").json()
 ```js
 const daily = dailyRaw.map((d) => ({zone: d.zone, date: d.date, tb1: +d.tb1, tb2: +d.tb2, tb4: +d.tb4}))
 
-const periods = lastFullPeriods(anchorDay(daily)).filter((p) => p.key !== "day")
+const anchor = anchorDay(daily)
 ```
 
 ```js
@@ -37,17 +37,29 @@ const tb = view(Inputs.radio(new Map([["TB1", "tb1"], ["TB2", "tb2"], ["TB4", "t
 
 ## Spread map
 
-Each zone's average daily spread over the last complete year, month or week. A zone is shaded
-only when it reported at least 80% of the period's days. Click a country to add it to the
-comparison below.
+Each zone's average daily spread over a year, month or week: pick the period type, then the period.
+The latest period is shown to date while it is still in progress. The colour scale is fixed for
+each period type and spread, so colours compare across periods; the most extreme 2% of values at
+either end take the end colours. A zone is shaded only when it reported at least 80% of the
+period's days (so far). Click a country to add it to the comparison below.
 
 ```js
-const periodKey = view(Inputs.radio(new Map(periods.map((p) => [p.label, p.key])), {value: "month", label: "Period"}))
+const PERIOD_KINDS = [["Year", "year"], ["Month", "month"], ["Week", "week"]]
+const periodKind = view(Inputs.radio(new Map(PERIOD_KINDS), {value: "month", label: "Period"}))
 ```
 
 ```js
-const period = periods.find((p) => p.key === periodKey)
-const spreadValues = periodMeans(daily, tb, period)
+const periodOptions = listPeriods(periodKind, anchor)
+const period = view(Inputs.select(periodOptions, {
+  value: periodOptions[0], format: (p) => p.label,
+  label: PERIOD_KINDS.find(([, k]) => k === periodKind)[0]
+}))
+```
+
+```js
+const spreadsByPeriod = periodMeans(daily, tb, periodKind, periodOptions)
+const spreadDomain = stableDomain(spreadsByPeriod, periodOptions)
+const spreadValues = spreadsByPeriod.get(period.key)
 ```
 
 ```js
@@ -57,7 +69,7 @@ const zonesInput = Inputs.checkbox(new Map(ZONES.map((z) => [z.short, z.key])), 
 ```js
 linkMapToInput(zoneMap({
   d3, Plot, geo, width,
-  values: spreadValues, selected: null,
+  values: spreadValues, selected: null, domain: spreadDomain,
   title: `Average ${tb.toUpperCase()} spread — ${period.label}`,
   subtitle: `Mean daily top-${tb.slice(2)} minus bottom-${tb.slice(2)} hourly price`,
   label: "EUR / MWh",
