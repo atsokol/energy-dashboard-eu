@@ -1,0 +1,21 @@
+/* Re-import default framework theme (air light / near-midnight dark) */
+@import url("observablehq:default.css");
+@import url("observablehq:theme-air.css");
+@import url("observablehq:theme-near-midnight.css") (prefers-color-scheme: dark);
+
+/* Cap prose width at 800px to match charts */
+#observablehq-main p,
+#observablehq-main table,
+#observablehq-main figure,
+#observablehq-main figcaption,
+#observablehq-main h1,
+#observablehq-main h2,
+#observablehq-main h3,
+#observablehq-main h4,
+#observablehq-main h5,
+#observablehq-main h6,
+#observablehq-main blockquote,
+#observablehq-main ol,
+#observablehq-main ul {
+  max-width: 800px;
+}

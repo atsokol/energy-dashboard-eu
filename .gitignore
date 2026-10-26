@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+dist/
+src/.observablehq/
+/.claude
+CLAUDE.md
+
+.env
+.env.local
+test/.generated/
+
+# Raw hourly downloads shared between loaders within one build (~30 MB). The aggregated
+# outputs in cache/*.csv are the committed fallback, so the raw files never need to be in git.
+cache/raw/

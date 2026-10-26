@@ -1,0 +1,25 @@
+{
+  "name": "energy-dashboard-eu",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "observable build",
+    "dev": "observable preview",
+    "test": "node test/smoke.test.mjs",
+    "clean": "observable clean"
+  },
+  "dependencies": {
+    "@observablehq/framework": "^1.13.0",
+    "@observablehq/plot": "^0.6",
+    "d3": "^7",
+    "d3-dsv": "^3"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.62.5",
+    "@rollup/rollup-darwin-x64": "^4.65.0",
+    "@rollup/rollup-linux-x64-gnu": "^4.62.5"
+  },
+  "devDependencies": {
+    "jsdom": "^23"
+  }
+}

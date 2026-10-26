@@ -1,0 +1,70 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Daily rebuild after the day-ahead auction: SDAC results are out ~12:45 CET and entsoemcp.com
+    # usually lands them within 1-3 hours. Cron is UTC and ignores DST: 15:30 UTC is 16:30 CET /
+    # 17:30 CEST, so tomorrow's prices are normally in every build.
+    - cron: "30 15 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Carries the last good aggregated snapshot between runs. The committed cache/*.csv is the
+      # floor; this restores anything fresher, so a build that meets an entsoemcp.com outage or
+      # rate limit still publishes recent data. cache/raw/ is excluded: it is per-build scratch.
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache/*.csv
+          key: dam-${{ github.run_id }}
+          restore-keys: dam-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build site
+        run: npm run build
+
+      # The site rebuilds unattended every day. Without a check between build and deploy, an
+      # upstream schema change would publish a blank dashboard silently.
+      - name: Smoke-test the rendered charts
+        run: |
+          npm test
+          HARNESS_WIDTH=400 npm test
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
