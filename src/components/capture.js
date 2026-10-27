@@ -21,6 +21,10 @@ const techOfPsr = new Map(CAPTURE_TECHS.flatMap((t) => t.psr.map((p) => [p, t.ke
 
 // A month needs 80% of its hours priced, the same coverage rule as the price maps.
 const MIN_COVERAGE = 0.8;
+// Below these a month's factor is noise, or 0/0 once the loader rounds it: a zone with a few kWh
+// of solar (far-north Nordic zones in winter), or a baseload price within a euro of zero.
+const MIN_MWH = 1;
+const MIN_BASE = 1;
 
 const daysIn = (month) => new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7), 0)).getUTCDate();
 
@@ -49,7 +53,7 @@ export function monthlyCapture(rows, notBefore) {
     if (![capture, baseload, mwh, hours].every(Number.isFinite)) continue;
     const b = base.get(`${month}|${r.currency}`);
     if (!b || hours > b.hours) base.set(`${month}|${r.currency}`, {price: baseload, hours});
-    if (mwh <= 0) continue;
+    if (mwh < MIN_MWH) continue;
     let a = tech.get(`${month}|${key}`);
     if (!a) tech.set(`${month}|${key}`, (a = {value: 0, mwh: 0}));
     a.value += capture * mwh; a.mwh += mwh;
@@ -64,7 +68,7 @@ export function monthlyCapture(rows, notBefore) {
   for (const [key, a] of tech) {
     const [month, t] = key.split("|");
     const b = baseByMonth.get(month);
-    if (!b || b.hours < daysIn(month) * 24 * MIN_COVERAGE) continue;
+    if (!b || b.hours < daysIn(month) * 24 * MIN_COVERAGE || Math.abs(b.value / b.hours) < MIN_BASE) continue;
     out.push({month: `${month}-01`, tech: t, capture: a.value / a.mwh, base: b.value / b.hours, gwh: a.mwh / 1000, hours: b.hours});
   }
   return out.sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : a.tech < b.tech ? -1 : 1));
@@ -101,11 +105,16 @@ function rollUp(rows, periodOf, need) {
     .map(([key, months]) => {
       const [zone, tech, period] = key.split("|");
       return {zone, tech, period, months: months.length, ...captureFactor(months)};
-    });
+    })
+    .filter((d) => Number.isFinite(d.value));
 }
 
 /** Monthly capture factors as rows {zone, tech, period: "YYYY-MM-01", capture, base, value, gwh}. */
-export const monthlyFactors = (rows) => rows.map((d) => ({zone: d.zone, tech: d.tech, period: d.month, months: 1, ...captureFactor([d])}));
+// Non-finite factors (no output, or a zero baseload, in a snapshot cached before the loader
+// dropped them) are skipped.
+export const monthlyFactors = (rows) => rows
+  .map((d) => ({zone: d.zone, tech: d.tech, period: d.month, months: 1, ...captureFactor([d])}))
+  .filter((d) => Number.isFinite(d.value));
 
 /**
  * Capture factor per zone, technology and calendar year: {zone, tech, period: "YYYY", months,
