@@ -13,10 +13,21 @@ grows more likely as its own output starts to set the price. Monthly from 2021 (
 converted to EUR. Wind is onshore and offshore together.
 
 ```js
-import {ZONES} from "./components/zones.js"
+import {zonesIn} from "./components/zones.js"
 import {annualFactors, monthlyFactors, pivotDomain, seasonalFactors, withShares} from "./components/capture.js"
-import {linkPeriod, linkValue, periodLinks, rememberZone, savedZone} from "./components/linking.js"
+import {linkPeriod, linkValue, periodLinks, regionInput, rememberZone, savedZone} from "./components/linking.js"
 import {captureLines, captureShareScatter, linkMapToInput, zoneMap} from "./components/charts.js"
+```
+
+```js
+// Shared by every page and remembered: the regions whose zones the maps, country lists and
+// comparison charts offer. Untick them all to show every zone.
+const regions = view(regionInput(Inputs))
+```
+
+```js
+const shownZones = zonesIn(regions)
+const shownKeys = shownZones.map((z) => z.key)
 ```
 
 ```js
@@ -93,13 +104,13 @@ const windValues = mapValues("wind")
 
 ```js
 // Shown below; declared here because the maps highlight it. Shared across pages and remembered.
-const zoneInput = rememberZone(Inputs.select(new Map(ZONES.map((z) => [z.name, z.key])), {value: savedZone("HU"), label: "Country"}))
+const zoneInput = rememberZone(Inputs.select(new Map(shownZones.map((z) => [z.name, z.key])), {value: savedZone("HU", shownKeys), label: "Country"}))
 const zone = Generators.input(zoneInput)
 ```
 
 ```js
 pair(...TECHS.map((tech) => linkMapToInput(zoneMap({
-  d3, Plot, geo, width: halfWidth, height: Math.round(halfWidth * (sideBySide ? 1.05 : 0.95)),
+  d3, Plot, geo, width: halfWidth, zones: shownKeys, height: Math.round(halfWidth * (sideBySide ? 1.05 : 0.95)),
   values: tech === "solar" ? solarValues : windValues, selected: zone, domain: mapDomain, pivot: 1,
   format: fmtPct, legendFormat: ".0%",
   title: `${tech === "solar" ? "Solar" : "Wind"} capture factor — ${period.label}`,
@@ -115,7 +126,9 @@ the pack usually has more of the technology than its interconnectors can export 
 windy days.
 
 ```js
-const zones = view(Inputs.checkbox(new Map(ZONES.map((z) => [z.short, z.key])), {value: ["DE_LU", "PL", "HU", "RO", "GR", "LT"], label: "Countries"}))
+// Defaults among the zones on show, else the first six of them.
+const DEFAULT_COMPARE = ["DE_LU", "FR", "ES", "SE_3", "PL", "GR"].filter((k) => shownKeys.includes(k))
+const zones = view(Inputs.checkbox(new Map(shownZones.map((z) => [z.short, z.key])), {value: DEFAULT_COMPARE.length ? DEFAULT_COMPARE : shownKeys.slice(0, 6), label: "Countries"}))
 ```
 
 ```js

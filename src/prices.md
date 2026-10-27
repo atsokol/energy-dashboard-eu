@@ -5,16 +5,27 @@ toc: true
 
 # Day-ahead prices
 
-Hourly **day-ahead market (DAM)** prices for eighteen zones from 2021 (ENTSO-E via
+Hourly **day-ahead market (DAM)** prices for 44 zones from 2021 (ENTSO-E via
 [entsoemcp.com](https://entsoemcp.com)), in EUR/MWh on local market days. Early BGN and RON prices
 are converted to EUR.
 
 ```js
-import {START_DATE, ZONES} from "./components/zones.js"
+import {START_DATE, ZONES, zonesIn} from "./components/zones.js"
 import {anchorDay, cumulativeByYear, fuelMonthly, listPeriods, monthlyMeans, periodMeans, stableDomain} from "./components/dam.js"
 import {hourlyProfiles} from "./components/residual.js"
-import {brushHours, linkedBrush, linkPeriod, linkValue, periodLinks, rememberZone, savedZone} from "./components/linking.js"
+import {brushHours, linkedBrush, linkPeriod, linkValue, periodLinks, regionInput, rememberZone, savedZone} from "./components/linking.js"
 import {cumulativeYearChart, hourlyByYearChart, linkMapToInput, hourlyMixChart, monthBuildChart, monthlyPriceChart, playGroup, priceResidualScatter, scrubber, zoneMap} from "./components/charts.js"
+```
+
+```js
+// Shared by every page and remembered: the regions whose zones the maps, country lists and
+// comparison charts offer. Untick them all to show every zone.
+const regions = view(regionInput(Inputs))
+```
+
+```js
+const shownZones = zonesIn(regions)
+const shownKeys = shownZones.map((z) => z.key)
 ```
 
 ```js
@@ -79,13 +90,13 @@ const priceValues = pricesByPeriod.get(period.key)
 
 ```js
 // Shown below; declared here because the map highlights it. Shared across pages and remembered.
-const zoneInput = rememberZone(Inputs.select(new Map(ZONES.map((z) => [z.name, z.key])), {value: savedZone("HU"), label: "Country"}))
+const zoneInput = rememberZone(Inputs.select(new Map(shownZones.map((z) => [z.name, z.key])), {value: savedZone("HU", shownKeys), label: "Country"}))
 const zone = Generators.input(zoneInput)
 ```
 
 ```js
 linkMapToInput(zoneMap({
-  d3, Plot, geo, width,
+  d3, Plot, geo, width, zones: shownKeys,
   values: priceValues, selected: zone, domain: priceDomain,
   title: `Average day-ahead price — ${period.label}`,
   subtitle: "Hour-weighted average of hourly DAM clearing prices",
@@ -105,7 +116,7 @@ const fromYear = view(Inputs.select(YEARS, {value: "2023", label: "From"}))
 ```
 
 ```js
-monthlyPriceChart({d3, Plot, width, rows: monthly.filter((d) => d.month >= `${fromYear}-01-01`), zone, cost: fuelByMonth})
+monthlyPriceChart({d3, Plot, width, rows: monthly.filter((d) => d.month >= `${fromYear}-01-01` && (d.zone === zone || shownKeys.includes(d.zone))), zone, cost: fuelByMonth})
 ```
 
 ## Hourly prices and residual load
@@ -122,15 +133,50 @@ const month = view(linkValue(links.month, "profiles", Inputs.select(new Map(MONT
 ```js
 // One file per zone, so the page loads only the selected country; FileAttachment needs literal paths.
 const RESIDUAL = {
-  DE_LU: FileAttachment("./data/residual/DE_LU.csv"), AT: FileAttachment("./data/residual/AT.csv"),
-  CZ: FileAttachment("./data/residual/CZ.csv"), SK: FileAttachment("./data/residual/SK.csv"),
-  PL: FileAttachment("./data/residual/PL.csv"), HU: FileAttachment("./data/residual/HU.csv"),
-  SI: FileAttachment("./data/residual/SI.csv"), HR: FileAttachment("./data/residual/HR.csv"),
-  RO: FileAttachment("./data/residual/RO.csv"), BG: FileAttachment("./data/residual/BG.csv"),
-  GR: FileAttachment("./data/residual/GR.csv"), RS: FileAttachment("./data/residual/RS.csv"),
-  ME: FileAttachment("./data/residual/ME.csv"), MK: FileAttachment("./data/residual/MK.csv"),
-  AL: FileAttachment("./data/residual/AL.csv"), EE: FileAttachment("./data/residual/EE.csv"),
-  LV: FileAttachment("./data/residual/LV.csv"), LT: FileAttachment("./data/residual/LT.csv")
+  DE_LU: FileAttachment("./data/residual/DE_LU.csv"),
+  FR: FileAttachment("./data/residual/FR.csv"),
+  BE: FileAttachment("./data/residual/BE.csv"),
+  NL: FileAttachment("./data/residual/NL.csv"),
+  AT: FileAttachment("./data/residual/AT.csv"),
+  CH: FileAttachment("./data/residual/CH.csv"),
+  IE_SEM: FileAttachment("./data/residual/IE_SEM.csv"),
+  ES: FileAttachment("./data/residual/ES.csv"),
+  PT: FileAttachment("./data/residual/PT.csv"),
+  IT_NORD: FileAttachment("./data/residual/IT_NORD.csv"),
+  IT_CNOR: FileAttachment("./data/residual/IT_CNOR.csv"),
+  IT_CSUD: FileAttachment("./data/residual/IT_CSUD.csv"),
+  IT_SUD: FileAttachment("./data/residual/IT_SUD.csv"),
+  IT_CALA: FileAttachment("./data/residual/IT_CALA.csv"),
+  IT_SICI: FileAttachment("./data/residual/IT_SICI.csv"),
+  IT_SARD: FileAttachment("./data/residual/IT_SARD.csv"),
+  DK_1: FileAttachment("./data/residual/DK_1.csv"),
+  DK_2: FileAttachment("./data/residual/DK_2.csv"),
+  NO_1: FileAttachment("./data/residual/NO_1.csv"),
+  NO_2: FileAttachment("./data/residual/NO_2.csv"),
+  NO_3: FileAttachment("./data/residual/NO_3.csv"),
+  NO_4: FileAttachment("./data/residual/NO_4.csv"),
+  NO_5: FileAttachment("./data/residual/NO_5.csv"),
+  SE_1: FileAttachment("./data/residual/SE_1.csv"),
+  SE_2: FileAttachment("./data/residual/SE_2.csv"),
+  SE_3: FileAttachment("./data/residual/SE_3.csv"),
+  SE_4: FileAttachment("./data/residual/SE_4.csv"),
+  FI: FileAttachment("./data/residual/FI.csv"),
+  EE: FileAttachment("./data/residual/EE.csv"),
+  LV: FileAttachment("./data/residual/LV.csv"),
+  LT: FileAttachment("./data/residual/LT.csv"),
+  PL: FileAttachment("./data/residual/PL.csv"),
+  CZ: FileAttachment("./data/residual/CZ.csv"),
+  SK: FileAttachment("./data/residual/SK.csv"),
+  HU: FileAttachment("./data/residual/HU.csv"),
+  SI: FileAttachment("./data/residual/SI.csv"),
+  HR: FileAttachment("./data/residual/HR.csv"),
+  RO: FileAttachment("./data/residual/RO.csv"),
+  BG: FileAttachment("./data/residual/BG.csv"),
+  GR: FileAttachment("./data/residual/GR.csv"),
+  RS: FileAttachment("./data/residual/RS.csv"),
+  ME: FileAttachment("./data/residual/ME.csv"),
+  MK: FileAttachment("./data/residual/MK.csv"),
+  AL: FileAttachment("./data/residual/AL.csv")
 }
 ```
 
@@ -239,15 +285,50 @@ the dots below; click to clear.
 ```js
 // One file per zone, like the residual-load files.
 const GEN_HOURLY = {
-  DE_LU: FileAttachment("./data/gen-hourly/DE_LU.csv"), AT: FileAttachment("./data/gen-hourly/AT.csv"),
-  CZ: FileAttachment("./data/gen-hourly/CZ.csv"), SK: FileAttachment("./data/gen-hourly/SK.csv"),
-  PL: FileAttachment("./data/gen-hourly/PL.csv"), HU: FileAttachment("./data/gen-hourly/HU.csv"),
-  SI: FileAttachment("./data/gen-hourly/SI.csv"), HR: FileAttachment("./data/gen-hourly/HR.csv"),
-  RO: FileAttachment("./data/gen-hourly/RO.csv"), BG: FileAttachment("./data/gen-hourly/BG.csv"),
-  GR: FileAttachment("./data/gen-hourly/GR.csv"), RS: FileAttachment("./data/gen-hourly/RS.csv"),
-  ME: FileAttachment("./data/gen-hourly/ME.csv"), MK: FileAttachment("./data/gen-hourly/MK.csv"),
-  AL: FileAttachment("./data/gen-hourly/AL.csv"), EE: FileAttachment("./data/gen-hourly/EE.csv"),
-  LV: FileAttachment("./data/gen-hourly/LV.csv"), LT: FileAttachment("./data/gen-hourly/LT.csv")
+  DE_LU: FileAttachment("./data/gen-hourly/DE_LU.csv"),
+  FR: FileAttachment("./data/gen-hourly/FR.csv"),
+  BE: FileAttachment("./data/gen-hourly/BE.csv"),
+  NL: FileAttachment("./data/gen-hourly/NL.csv"),
+  AT: FileAttachment("./data/gen-hourly/AT.csv"),
+  CH: FileAttachment("./data/gen-hourly/CH.csv"),
+  IE_SEM: FileAttachment("./data/gen-hourly/IE_SEM.csv"),
+  ES: FileAttachment("./data/gen-hourly/ES.csv"),
+  PT: FileAttachment("./data/gen-hourly/PT.csv"),
+  IT_NORD: FileAttachment("./data/gen-hourly/IT_NORD.csv"),
+  IT_CNOR: FileAttachment("./data/gen-hourly/IT_CNOR.csv"),
+  IT_CSUD: FileAttachment("./data/gen-hourly/IT_CSUD.csv"),
+  IT_SUD: FileAttachment("./data/gen-hourly/IT_SUD.csv"),
+  IT_CALA: FileAttachment("./data/gen-hourly/IT_CALA.csv"),
+  IT_SICI: FileAttachment("./data/gen-hourly/IT_SICI.csv"),
+  IT_SARD: FileAttachment("./data/gen-hourly/IT_SARD.csv"),
+  DK_1: FileAttachment("./data/gen-hourly/DK_1.csv"),
+  DK_2: FileAttachment("./data/gen-hourly/DK_2.csv"),
+  NO_1: FileAttachment("./data/gen-hourly/NO_1.csv"),
+  NO_2: FileAttachment("./data/gen-hourly/NO_2.csv"),
+  NO_3: FileAttachment("./data/gen-hourly/NO_3.csv"),
+  NO_4: FileAttachment("./data/gen-hourly/NO_4.csv"),
+  NO_5: FileAttachment("./data/gen-hourly/NO_5.csv"),
+  SE_1: FileAttachment("./data/gen-hourly/SE_1.csv"),
+  SE_2: FileAttachment("./data/gen-hourly/SE_2.csv"),
+  SE_3: FileAttachment("./data/gen-hourly/SE_3.csv"),
+  SE_4: FileAttachment("./data/gen-hourly/SE_4.csv"),
+  FI: FileAttachment("./data/gen-hourly/FI.csv"),
+  EE: FileAttachment("./data/gen-hourly/EE.csv"),
+  LV: FileAttachment("./data/gen-hourly/LV.csv"),
+  LT: FileAttachment("./data/gen-hourly/LT.csv"),
+  PL: FileAttachment("./data/gen-hourly/PL.csv"),
+  CZ: FileAttachment("./data/gen-hourly/CZ.csv"),
+  SK: FileAttachment("./data/gen-hourly/SK.csv"),
+  HU: FileAttachment("./data/gen-hourly/HU.csv"),
+  SI: FileAttachment("./data/gen-hourly/SI.csv"),
+  HR: FileAttachment("./data/gen-hourly/HR.csv"),
+  RO: FileAttachment("./data/gen-hourly/RO.csv"),
+  BG: FileAttachment("./data/gen-hourly/BG.csv"),
+  GR: FileAttachment("./data/gen-hourly/GR.csv"),
+  RS: FileAttachment("./data/gen-hourly/RS.csv"),
+  ME: FileAttachment("./data/gen-hourly/ME.csv"),
+  MK: FileAttachment("./data/gen-hourly/MK.csv"),
+  AL: FileAttachment("./data/gen-hourly/AL.csv")
 }
 ```
 

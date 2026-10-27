@@ -11,10 +11,21 @@ is oil, batteries and unclassified. Gross output as reported: no imports, and so
 rooftop solar.
 
 ```js
-import {ZONES} from "./components/zones.js"
-import {rememberZone, savedZone} from "./components/linking.js"
+import {ZONES, zonesIn} from "./components/zones.js"
+import {regionInput, rememberZone, savedZone} from "./components/linking.js"
 import {annualMix, lastFullYear} from "./components/gen.js"
 import {GEN_COLORS, GEN_OPACITY, capacityChart, generationAreaChart, linkMapToInput, mixMap, seasonalProfileChart} from "./components/charts.js"
+```
+
+```js
+// Shared by every page and remembered: the regions whose zones the maps, country lists and
+// comparison charts offer. Untick them all to show every zone.
+const regions = view(regionInput(Inputs))
+```
+
+```js
+const shownZones = zonesIn(regions)
+const shownKeys = shownZones.map((z) => z.key)
 ```
 
 ```js
@@ -43,12 +54,12 @@ select it below.
 
 ```js
 // Shown below; declared here because the map highlights it. Shared across pages and remembered.
-const zoneInput = rememberZone(Inputs.select(new Map(ZONES.map((z) => [z.name, z.key])), {value: savedZone("HU"), label: "Country"}))
+const zoneInput = rememberZone(Inputs.select(new Map(shownZones.map((z) => [z.name, z.key])), {value: savedZone("HU", shownKeys), label: "Country"}))
 const zone = Generators.input(zoneInput)
 ```
 
 ```js
-linkMapToInput(mixMap({d3, Plot, geo, width, mix, selected: zone, year: mixYear}), zoneInput, {zoneOf: (d) => d?.zone ?? null})
+linkMapToInput(mixMap({d3, Plot, geo, width, mix, zones: shownKeys, selected: zone, year: mixYear}), zoneInput, {zoneOf: (d) => d?.zone ?? null})
 ```
 
 ## Monthly generation and installed capacity

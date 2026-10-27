@@ -8,7 +8,7 @@ import {captureTechByKey, seasonLabel} from "./capture.js";
 import {GEN_GROUPS, completeGrid, genGroupByKey, SEASONS} from "./gen.js";
 import {outlineBrush, plotSvg} from "./linking.js";
 import {multiSeriesTip} from "./tooltips.js";
-import {ZONES, zoneByIso, zoneByKey} from "./zones.js";
+import {ZONE_KEYS, ZONES, zoneByKey} from "./zones.js";
 
 // Sequential blue ramp (validated reference palette, steps 100 → 700) for magnitude on the maps.
 const RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"];
@@ -20,7 +20,7 @@ const GAS_COST = "gas-plant cost (2 × THE gas + 0.4 × EUA)";
 // Validated categorical palette, in its CVD-safe order.
 const CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
 
-// Hue slot per selected zone, kept for the life of the page. Eighteen zones cannot each own one of
+// Hue slot per selected zone, kept for the life of the page. Forty-four zones cannot each own one of
 // eight hues without collisions, so a zone takes the first free slot when it is selected and keeps
 // it until deselected: adding or removing a country never repaints the others, and up to eight
 // selected countries are always distinct. A ninth reuses a hue (its direct label still names it).
@@ -39,13 +39,37 @@ export function seriesColors(keys) {
   return {domain: present.map((z) => z.name), range: present.map((z) => CATEGORICAL[slots.get(z.key)])};
 }
 
-// Label anchors where a shape's centroid lands somewhere unhelpful (Croatia's sits in Bosnia, and
-// Slovenia's and Croatia's collide at their shared border).
-const LABEL_AT = {SI: [14.4, 46.2], HR: [17.0, 45.45], GR: [22.2, 39.6], DE_LU: [10.3, 51.0]};
+// Label anchors where a shape's centroid lands somewhere unhelpful (Croatia's sits in Bosnia,
+// Slovenia's and Croatia's collide at their shared border, Italy Centre-South's is at sea).
+const LABEL_AT = {SI: [14.4, 46.2], HR: [17.0, 45.45], GR: [22.2, 39.6], DE_LU: [10.3, 51.0], IT_CSUD: [13.4, 42.0]};
 
-/** [lon, lat] to label (or place a symbol on) zone `z`, given the map's in-scope features. */
+/** Zone key of a map feature — e.g. of a map's `value`, the feature under the pointer. */
+export const zoneOfFeature = (f) => f?.properties?.zone ?? null;
+
+/**
+ * A map's features split into the shapes of the zones on show (`keys`, default every zone) and
+ * the grey context around them: other countries, and zones of regions not ticked.
+ */
+function splitFeatures(geo, keys = ZONE_KEYS) {
+  const shown = new Set(keys);
+  return {
+    inScope: geo.features.filter((f) => shown.has(zoneOfFeature(f))),
+    context: geo.features.filter((f) => !shown.has(zoneOfFeature(f)))
+  };
+}
+
+/** [lon, lat] to label (or place a symbol on) zone `z`: its largest shape's centroid. */
 function zoneAnchor(d3, inScope, z) {
-  return LABEL_AT[z.key] ?? d3.geoCentroid(inScope.find((f) => f.properties.id === z.iso[0]));
+  if (LABEL_AT[z.key]) return LABEL_AT[z.key];
+  const own = inScope.filter((f) => zoneOfFeature(f) === z.key);
+  return d3.geoCentroid(d3.greatest(own, (f) => d3.geoArea(f)));
+}
+
+/** Map height for a width: tall enough for the zones on show, from Portugal to North Cape. */
+function mapHeight(d3, inScope, w) {
+  const [[x0, y0], [x1, y1]] = d3.geoPath(d3.geoConicEqualArea().parallels([40, 58]).rotate([-10, 0]))
+    .bounds({type: "FeatureCollection", features: inScope});
+  return Math.round(Math.min(Math.max(w * ((y1 - y0) / (x1 - x0)), w * 0.6), w * 1.25, 900));
 }
 
 /**
@@ -72,27 +96,29 @@ const fmt1 = (x) => x.toFixed(1);
  * below, blue above) instead of the sequential blue ramp. `height` overrides the default for maps
  * drawn in pairs.
  */
-export function zoneMap({d3, Plot, geo, values, selected, width, title, subtitle, label, domain, format = fmt1, legendFormat, pivot = null, caption = SOURCE, height}) {
+export function zoneMap({d3, Plot, geo, values, zones = ZONE_KEYS, selected, width, title, subtitle, label, domain, format = fmt1, legendFormat, pivot = null, caption = SOURCE, height}) {
   const byZone = new Map(values.map((d) => [d.zone, d.value]));
-  const inScope = geo.features.filter((f) => zoneByIso.has(f.properties.id));
-  const context = geo.features.filter((f) => !zoneByIso.has(f.properties.id));
-  const zoneOf = (f) => zoneByIso.get(f.properties.id).key;
+  const {inScope, context} = splitFeatures(geo, zones);
+  const zoneOf = zoneOfFeature;
   const valued = inScope.filter((f) => byZone.has(zoneOf(f)));
   const missing = inScope.filter((f) => !byZone.has(zoneOf(f)));
 
-  const labels = ZONES.map((z) => {
+  const w = Math.min(width, 800);
+  // On a phone-width map of many zones, values would overlap: names only (the colour and the
+  // tooltip still give the value).
+  const namesOnly = w < 500 && zones.length > 20;
+  const labels = ZONES.filter((z) => zones.includes(z.key)).map((z) => {
     const [lon, lat] = zoneAnchor(d3, inScope, z);
     const v = byZone.get(z.key);
-    return {zone: z.key, lon, lat, text: `${z.short}\n${v === undefined ? "n/a" : format(v)}`, dark: v !== undefined};
+    return {zone: z.key, lon, lat, text: namesOnly ? z.short : `${z.short}\n${v === undefined ? "n/a" : format(v)}`, dark: v !== undefined};
   });
 
   const extent = d3.extent(values, (d) => d.value);
-  const w = Math.min(width, 800);
   const plot = Plot.plot({
     title, subtitle, caption,
     width: w,
-    height: height ?? Math.round(Math.min(w * 0.95, 680)),
-    projection: {type: "conic-equal-area", parallels: [40, 58], rotate: [-18, 0], domain: {type: "FeatureCollection", features: inScope}, inset: 6},
+    height: height ?? mapHeight(d3, inScope, w),
+    projection: {type: "conic-equal-area", parallels: [40, 58], rotate: [-10, 0], domain: {type: "FeatureCollection", features: inScope}, inset: 6},
     color: {
       legend: true, label, clamp: true, tickFormat: legendFormat,
       domain: domain ?? (extent[0] === extent[1] ? [extent[0] - 1, extent[1] + 1] : extent),
@@ -106,7 +132,7 @@ export function zoneMap({d3, Plot, geo, values, selected, width, title, subtitle
       Plot.geo(valued, {
         fill: (f) => byZone.get(zoneOf(f)),
         stroke: "var(--theme-background)", strokeWidth: 1,
-        channels: {Country: (f) => zoneByIso.get(f.properties.id).name, [label]: (f) => byZone.get(zoneOf(f))},
+        channels: {Country: (f) => zoneByKey.get(zoneOf(f)).name, [label]: (f) => byZone.get(zoneOf(f))},
         tip: {format: {fill: false, [label]: format}}
       }),
       Plot.geo(inScope.filter((f) => zoneOf(f) === selected), {stroke: "currentColor", strokeWidth: 2.5}),
@@ -120,9 +146,6 @@ export function zoneMap({d3, Plot, geo, values, selected, width, title, subtitle
   plot.style.cursor = "pointer";
   return plot;
 }
-
-/** Zone key of a map feature — e.g. of a map's `value`, the feature under the pointer. */
-export const zoneOfFeature = (f) => zoneByIso.get(f?.properties?.id)?.key ?? null;
 
 /**
  * Make a click on `map` select the hovered zone in `input`, so the map and the input are one
@@ -693,11 +716,10 @@ function donutCallouts(slices, R, gap) {
  * with its share. Returns the Plot figure; its `value` is the hovered zone's row ({zone, …}) or
  * null. `mix` is annualMix output: [{zone, total (GWh), mix: Map(group → GWh)}].
  */
-export function mixMap({d3, Plot, geo, mix, selected, width, year}) {
-  const byZone = new Map(mix.map((d) => [d.zone, d]));
-  const inScope = geo.features.filter((f) => zoneByIso.has(f.properties.id));
-  const context = geo.features.filter((f) => !zoneByIso.has(f.properties.id));
-  const zoneOf = (f) => zoneByIso.get(f.properties.id).key;
+export function mixMap({d3, Plot, geo, mix, zones = ZONE_KEYS, selected, width, year}) {
+  const byZone = new Map(mix.filter((d) => zones.includes(d.zone)).map((d) => [d.zone, d]));
+  const {inScope, context} = splitFeatures(geo, zones);
+  const zoneOf = zoneOfFeature;
   const w = Math.min(width, 800);
   const maxR = Math.max(28, w * DONUT_MAX_R);
   const hoverR = Math.max(48, w * DONUT_HOVER_R);
@@ -712,7 +734,7 @@ export function mixMap({d3, Plot, geo, mix, selected, width, year}) {
     })
     .sort((a, b) => b.twh - a.twh);
   const pointByZone = new Map(points.map((p) => [p.zone, p]));
-  const missing = ZONES.filter((z) => !byZone.has(z.key)).map((z) => {
+  const missing = ZONES.filter((z) => zones.includes(z.key) && !byZone.has(z.key)).map((z) => {
     const [lon, lat] = zoneAnchor(d3, inScope, z);
     return {zone: z.key, lon, lat, text: `${z.short}\nn/a`};
   });
@@ -840,8 +862,8 @@ export function mixMap({d3, Plot, geo, mix, selected, width, year}) {
     subtitle: "Share of each type; donut area ∝ total generation. Hover for the breakdown",
     caption: SOURCE,
     width: w,
-    height: Math.round(Math.min(w * 0.95, 680)),
-    projection: {type: "conic-equal-area", parallels: [40, 58], rotate: [-18, 0], domain: {type: "FeatureCollection", features: inScope}, inset: 6},
+    height: mapHeight(d3, inScope, w),
+    projection: {type: "conic-equal-area", parallels: [40, 58], rotate: [-10, 0], domain: {type: "FeatureCollection", features: inScope}, inset: 6},
     r: {domain: [0, d3.max(points, (d) => d.twh) ?? 1], range: [0, maxR]},
     color: {legend: true, ...GEN_COLORS},
     marks: [

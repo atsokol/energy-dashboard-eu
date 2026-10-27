@@ -1,7 +1,8 @@
 # EU power markets dashboard
 
 Observable Framework site for GitHub Pages: day-ahead prices and TB1/TB2/TB4 battery-arbitrage
-spreads for 18 bidding zones in Central Europe, South-East Europe and the Baltics, from 2021.
+spreads for all 44 bidding zones with ENTSO-E day-ahead prices (Western Europe, Iberia, the seven
+Italian zones, the Nordics zone by zone, the Baltics, Central-East and South-East Europe), from 2021.
 Data: ENTSO-E Transparency Platform via [entsoemcp.com](https://entsoemcp.com) (anonymous API,
 no key).
 
@@ -28,13 +29,19 @@ fallback, shared client modules in `src/components/`, a jsdom smoke test gating 
 Map colour scales are fixed per period type (P2-P98 of all zone-period values, clamped), so
 colours compare across periods.
 
-Clicking a country on a map selects it. The country, period type, month and year are shared
-across pages and remembered (localStorage); a month or year map period follows the month and year
+Every page starts with a **Regions** filter: the maps zoom to the ticked regions, and the country
+lists, comparison checkboxes and grey context lines offer only their zones (none ticked shows
+all). Colour scales stay computed over every zone, so they do not shift with the filter.
+
+Clicking a country on a map selects it. The regions, country, period type, month and year are
+shared across pages and remembered (localStorage); a month or year map period follows the month and year
 controls.
 
 ## Data pipeline
 
-All data is downloaded and aggregated at build time. `src/data/dam-daily.csv.js` fetches hourly
+All data is downloaded and aggregated at build time. When zones are added, the first build
+downloads their full hourly history for the residual and hourly-mix loaders (~40 s per new zone);
+later builds are incremental again. `src/data/dam-daily.csv.js` fetches hourly
 prices for every zone (one `/download` call per zone) and reduces them to `dam-daily.csv` (zone ×
 day: average, TB1, TB2, TB4, negative hours). Pages load ~580 KB of gzipped static files and are ready in
 about 0.2 s. If entsoemcp.com is down or rate-limits the build, loaders serve the last snapshot
@@ -92,9 +99,16 @@ node test/serve-dist.mjs   # serve the built dist/ like GitHub Pages (gzip) on :
 
 ## Data notes
 
-- **Zones**: Central Europe = DE-LU, AT, CZ, SK, PL, HU, SI; SEE = HR, RO, BG, GR, RS, ME, MK, AL;
-  Baltics = EE, LV, LT. Bosnia & Herzegovina publishes no DA price on ENTSO-E. AL, ME and MK
-  start in 2023.
+- **Zones** (`src/components/zones.js`): Western Europe = DE-LU, FR, BE, NL, AT, CH, IE (SEM);
+  Iberia = ES, PT; Italy = NORD, CNOR, CSUD, SUD, CALA, SICI, SARD; Nordics = DK1-2, NO1-5, SE1-4,
+  FI; Baltics = EE, LV, LT; Central-East Europe = PL, CZ, SK, HU, SI, HR, RO, BG; South-East
+  Europe = GR, RS, ME, MK, AL. Bosnia & Herzegovina publishes no DA price on ENTSO-E, and
+  entsoemcp.com has none for Great Britain (post-Brexit) or Cyprus since 2021, so they are grey
+  context. AL, ME and MK start in 2023.
+- **Map shapes**: `src/data/europe.geo.json` holds bidding-zone outlines (`properties.zone` = zone
+  key; context countries have `zone: null`), derived from Electricity Maps' `geo/world.geojson`
+  (github.com/electricitymaps/electricitymaps-contrib), simplified with mapshaper. Check that
+  project's licence before relying on the shapes in a public deployment.
 - **Currency**: BG published in BGN until 2022-01-21 (converted at the 1.95583 peg), RO in RON
   until 2021-06-17 (ECB monthly rates). Unlabelled rows are EUR.
 - **Time**: all metrics use the zone's local market day and hour.

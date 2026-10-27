@@ -1,6 +1,6 @@
 // Monthly solar and wind capture prices for every zone in scope, 2021 to the last complete month:
 // zone × month × tech → capture price, baseload price (EUR/MWh), generation (GWh) and priced hours.
-// ~2.5k rows (~150 KB). entsoemcp.com weights hourly prices by hourly output server-side
+// ~6k rows (~350 KB). entsoemcp.com weights hourly prices by hourly output server-side
 // (`capture_price` derivation, local months), so this is one ~1 s JSON call per zone instead of
 // ~500 MB of hourly generation.
 
@@ -24,9 +24,9 @@ process.stdout.write(
         gwh: round(d.gwh, 1000), hours: d.hours
       }))
     );
-    // Guard against a truncated upstream response replacing a good cache: 18 zones × ~5.8 years
+    // Guard against a truncated upstream response replacing a good cache: 44 zones × ~5.8 years
     // × 1-2 technologies.
-    if (rows.length < 1_500) throw new Error(`only ${rows.length} rows — upstream looks truncated`);
+    if (rows.length < 3_500) throw new Error(`only ${rows.length} rows — upstream looks truncated`);
     console.warn(`[capture-monthly] ${rows.length} rows, through ${rows.map((d) => d.month).sort().at(-1)}`);
     return csvFormat(rows);
   })

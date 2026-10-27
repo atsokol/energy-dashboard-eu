@@ -1,27 +1,33 @@
-// Links between controls and charts: the country remembered across pages, a month shared by
-// several month controls, and an hour-of-day brush shared by the hourly charts and the price vs
+// Links between controls and charts: the regions and country remembered across pages, a month
+// shared by several month controls, and an hour-of-day brush shared by the hourly charts and the price vs
 // residual load scatter. d3 is passed in (a page global), as in charts.js.
 
-import {zoneByKey} from "./zones.js";
+import {REGIONS, ZONE_KEYS, zoneByKey} from "./zones.js";
 
 // ---------------------------------------------------------------------------------------------
 // Country, remembered across pages and visits
 // ---------------------------------------------------------------------------------------------
 
 const ZONE_KEY = "energy-dashboard-eu:zone";
+const REGIONS_KEY = "energy-dashboard-eu:regions";
 
-/** The country picked last on any page, or `fallback`. Storage can be blocked: never throws. */
-export function savedZone(fallback) {
+/**
+ * The country picked last on any page if it is among `keys` (the zones on show), else `fallback`
+ * if it is, else the first of `keys`. Storage can be blocked: never throws.
+ */
+export function savedZone(fallback, keys = ZONE_KEYS) {
   try {
     const zone = localStorage.getItem(ZONE_KEY);
-    if (zoneByKey.has(zone)) return zone;
+    if (keys.includes(zone)) return zone;
   } catch {}
-  return fallback;
+  return keys.includes(fallback) ? fallback : keys[0];
 }
 
 /**
  * Store every country picked on `input` (an Inputs.select of zone keys) so the other pages and
- * the next visit start on it, and follow a change made in another open tab of the site.
+ * the next visit start on it, and follow a change made in another open tab of the site when the
+ * input offers that country. The select is rebuilt whenever the regions change; a replaced one
+ * (no longer in the page) ignores other tabs.
  */
 export function rememberZone(input) {
   input.addEventListener("input", () => {
@@ -29,7 +35,40 @@ export function rememberZone(input) {
   });
   window.addEventListener("storage", (event) => {
     if (event.key !== ZONE_KEY || !zoneByKey.has(event.newValue) || event.newValue === input.value) return;
+    if (!input.isConnected || ![...input.querySelectorAll("option")].some((o) => o.textContent === zoneByKey.get(event.newValue).name)) return;
     input.value = event.newValue;
+    input.dispatchEvent(new Event("input", {bubbles: true}));
+  });
+  return input;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Regions, remembered across pages and visits
+// ---------------------------------------------------------------------------------------------
+
+function savedRegions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(REGIONS_KEY));
+    if (Array.isArray(saved)) return REGIONS.filter((r) => saved.includes(r));
+  } catch {}
+  return REGIONS;
+}
+
+/**
+ * The region checkboxes shown at the top of every page (`Inputs` is the page global). Ticking a
+ * region on one page ticks it on the others, in other open tabs too, and on the next visit.
+ * Pass the value through zonesIn: no region ticked shows every zone.
+ */
+export function regionInput(Inputs) {
+  const input = Inputs.checkbox(REGIONS, {value: savedRegions(), label: "Regions"});
+  input.addEventListener("input", () => {
+    try { localStorage.setItem(REGIONS_KEY, JSON.stringify(input.value)); } catch {}
+  });
+  window.addEventListener("storage", (event) => {
+    if (event.key !== REGIONS_KEY) return;
+    const next = savedRegions();
+    if (next.join() === input.value.join()) return;
+    input.value = next;
     input.dispatchEvent(new Event("input", {bubbles: true}));
   });
   return input;

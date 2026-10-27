@@ -10,10 +10,21 @@ gross margin per MWh of an x-hour battery cycling once a day with perfect foresi
 hourly prices, so it understates what 15-minute dispatch (since October 2025) can capture.
 
 ```js
-import {ZONES} from "./components/zones.js"
-import {linkPeriod, linkValue, periodLinks, rememberZone, savedZone} from "./components/linking.js"
+import {zonesIn} from "./components/zones.js"
+import {linkPeriod, linkValue, periodLinks, regionInput, rememberZone, savedZone} from "./components/linking.js"
 import {anchorDay, listPeriods, periodMeans, rollingMeans, spreadBand, stableDomain} from "./components/dam.js"
 import {linkMapToInput, spreadBandChart, spreadLines, zoneMap} from "./components/charts.js"
+```
+
+```js
+// Shared by every page and remembered: the regions whose zones the maps, country lists and
+// comparison charts offer. Untick them all to show every zone.
+const regions = view(regionInput(Inputs))
+```
+
+```js
+const shownZones = zonesIn(regions)
+const shownKeys = shownZones.map((z) => z.key)
 ```
 
 ```js
@@ -65,13 +76,13 @@ const spreadValues = spreadsByPeriod.get(period.key)
 
 ```js
 // Shown below; declared here because the map highlights it. Shared across pages and remembered.
-const bandZoneInput = rememberZone(Inputs.select(new Map(ZONES.map((z) => [z.name, z.key])), {value: savedZone("DE_LU"), label: "Country"}))
+const bandZoneInput = rememberZone(Inputs.select(new Map(shownZones.map((z) => [z.name, z.key])), {value: savedZone("DE_LU", shownKeys), label: "Country"}))
 const bandZone = Generators.input(bandZoneInput)
 ```
 
 ```js
 linkMapToInput(zoneMap({
-  d3, Plot, geo, width,
+  d3, Plot, geo, width, zones: shownKeys,
   values: spreadValues, selected: bandZone, domain: spreadDomain,
   title: `Average ${tb.toUpperCase()} spread — ${period.label}`,
   subtitle: `Mean daily top-${tb.slice(2)} minus bottom-${tb.slice(2)} hourly price`,
@@ -107,7 +118,9 @@ Coupled markets move together, so a lasting gap between neighbours points to a l
 flexible capacity or import limits.
 
 ```js
-const zones = view(Inputs.checkbox(new Map(ZONES.map((z) => [z.short, z.key])), {value: ["DE_LU", "PL", "HU", "RO", "GR", "LT"], label: "Countries"}))
+// Defaults among the zones on show, else the first six of them.
+const DEFAULT_COMPARE = ["DE_LU", "FR", "ES", "SE_3", "PL", "GR"].filter((k) => shownKeys.includes(k))
+const zones = view(Inputs.checkbox(new Map(shownZones.map((z) => [z.short, z.key])), {value: DEFAULT_COMPARE.length ? DEFAULT_COMPARE : shownKeys.slice(0, 6), label: "Countries"}))
 ```
 
 ```js
