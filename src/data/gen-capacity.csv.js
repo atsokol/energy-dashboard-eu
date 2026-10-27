@@ -17,7 +17,7 @@ process.stdout.write(
     const rows = ZONE_KEYS.flatMap((zone, i) =>
       capacityByYear(raw[i]).map((d) => ({zone, year: d.year, group: d.group, mw: Math.round(d.mw)}))
     );
-    if (rows.length < 150) throw new Error(`only ${rows.length} rows — upstream looks truncated`);
+    if (rows.length < 300) throw new Error(`only ${rows.length} rows — upstream looks truncated`);
     console.warn(`[gen-capacity] ${rows.length} rows`);
     return csvFormat(rows);
   })

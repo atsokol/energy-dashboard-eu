@@ -1,6 +1,6 @@
 // Daily day-ahead metrics for every zone in scope, 2021 to date: hour-weighted average price and
-// the TB1 / TB2 / TB4 spreads per local market day. ~38k rows (~1.3 MB, ~0.4 MB gzipped) distilled
-// from ~900k hourly prices.
+// the TB1 / TB2 / TB4 spreads per local market day. ~90k rows (~3 MB, ~1 MB gzipped) distilled
+// from ~2.2M hourly prices.
 
 import {csvFormat} from "d3-dsv";
 import {withCache} from "../../lib/cache.js";
@@ -24,8 +24,8 @@ process.stdout.write(
         });
       }
     }
-    // Guard against a truncated upstream response replacing a good cache: 18 zones × ~5.8 years.
-    if (rows.length < 30_000) throw new Error(`only ${rows.length} zone-days — upstream looks truncated`);
+    // Guard against a truncated upstream response replacing a good cache: 44 zones × ~5.8 years.
+    if (rows.length < 75_000) throw new Error(`only ${rows.length} zone-days — upstream looks truncated`);
     console.warn(`[dam-daily] ${rows.length} zone-days, through ${rows.map((d) => d.date).sort().at(-1)}`);
     return csvFormat(rows);
   })
