@@ -22,6 +22,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # A normal build takes ~5 min; a first download of new zones under rate limiting ~20-30 min.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -36,15 +38,18 @@ jobs:
       # cache/residual/ also saves the residual-load loader from re-downloading ~500 MB of hourly
       # generation: it only fetches the weeks after its snapshot. cache/gen-hourly/ does the same
       # for the hourly generation-mix loader.
+      # Restore and save are separate steps so the downloads are kept even when a later step fails
+      # or the run is cancelled (actions/cache saves only after a fully successful job). Without
+      # that, a failed first build of new zones repeats every download and runs into rate limits.
       - name: Restore data cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             cache/*.csv
             cache/gen-profiles.zones
             cache/residual/*.csv
             cache/gen-hourly/*.csv
-          key: dam-${{ github.run_id }}
+          key: dam-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: dam-
 
       - name: Install dependencies
@@ -52,6 +57,17 @@ jobs:
 
       - name: Build site
         run: npm run build
+
+      - name: Save data cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            cache/*.csv
+            cache/gen-profiles.zones
+            cache/residual/*.csv
+            cache/gen-hourly/*.csv
+          key: dam-${{ github.run_id }}-${{ github.run_attempt }}
 
       # The site rebuilds unattended every week. Without a check between build and deploy, an
       # upstream schema change would publish a blank dashboard silently.
