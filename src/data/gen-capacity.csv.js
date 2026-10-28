@@ -3,7 +3,7 @@
 
 import {csvFormat} from "d3-dsv";
 import {withCache} from "../../lib/cache.js";
-import {CONCURRENCY, downloadRows, pool} from "../../lib/entsoe.js";
+import {downloadRows, rowsPerZone} from "../../lib/entsoe.js";
 import {capacityByYear} from "../components/gen.js";
 import {START_DATE, ZONE_KEYS} from "../components/zones.js";
 
@@ -11,11 +11,11 @@ const nextYear = `${new Date().getUTCFullYear() + 1}-01-01`;
 
 process.stdout.write(
   await withCache("gen-capacity.csv", async () => {
-    const raw = await pool(ZONE_KEYS, CONCURRENCY, (zone) =>
-      downloadRows(zone, {endpoint: "installed_generation_capacity", start: START_DATE, end: nextYear, aggregation: null})
-    );
-    const rows = ZONE_KEYS.flatMap((zone, i) =>
-      capacityByYear(raw[i]).map((d) => ({zone, year: d.year, group: d.group, mw: Math.round(d.mw)}))
+    // One snapshot a year: the latest cached year onwards is redone (a new year's snapshot lands).
+    const rows = await rowsPerZone("gen-capacity.csv", ZONE_KEYS, async (zone, since) =>
+      capacityByYear(await downloadRows(zone, {endpoint: "installed_generation_capacity", start: since ? `${since}-01-01` : START_DATE, end: nextYear, aggregation: null}))
+        .map((d) => ({zone, year: d.year, group: d.group, mw: Math.round(d.mw)})),
+      {key: "year", refreshFrom: (last) => last}
     );
     if (rows.length < 300) throw new Error(`only ${rows.length} rows — upstream looks truncated`);
     console.warn(`[gen-capacity] ${rows.length} rows`);

@@ -46,7 +46,6 @@ jobs:
         with:
           path: |
             cache/*.csv
-            cache/gen-profiles.zones
             cache/residual/*.csv
             cache/gen-hourly/*.csv
           key: dam-${{ github.run_id }}-${{ github.run_attempt }}
@@ -64,7 +63,6 @@ jobs:
         with:
           path: |
             cache/*.csv
-            cache/gen-profiles.zones
             cache/residual/*.csv
             cache/gen-hourly/*.csv
           key: dam-${{ github.run_id }}-${{ github.run_attempt }}

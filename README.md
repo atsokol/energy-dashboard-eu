@@ -39,20 +39,30 @@ controls.
 
 ## Data pipeline
 
-All data is downloaded and aggregated at build time. When zones are added, the first build
-downloads their full hourly history for the residual and hourly-mix loaders (~40 s per new zone);
-later builds are incremental again. `src/data/dam-daily.csv.js` fetches hourly
-prices for every zone (one `/download` call per zone) and reduces them to `dam-daily.csv` (zone ×
-day: average, TB1, TB2, TB4, negative hours). Pages load ~580 KB of gzipped static files and are ready in
-about 0.2 s. If entsoemcp.com is down or rate-limits the build, loaders serve the last snapshot
-committed in `cache/`, so the build still succeeds.
+All data is downloaded and aggregated at build time, **incrementally**. Every loader keeps its
+last output in `cache/` and, per zone, downloads only the recent period still open to revision;
+a zone with nothing in the snapshot (a country just added to `zones.js`), or a new loader, gets
+its full history from 2021. Refresh windows: day-ahead metrics the last 7 days; monthly
+generation and capture prices the last two cached months (generation is revised for weeks after
+delivery); capacity the latest cached year; residual load and the hourly mix from the start of
+the month before their latest month; seasonal profiles only zones missing the profile year (all
+of them in January). `ENTSOE_FULL=1` ignores the snapshots and downloads everything again.
+
+A zone whose download fails (rate limit, outage) keeps its cached rows while the other zones
+update, and a request the server asks to retry after more than 2 minutes is given up at once, so a
+bad day upstream leaves stale rows for that zone rather than a stalled or failed build. The
+build fails only when a file has no snapshot to fall back on. CI saves `cache/` after the build
+step even when a later step fails, so downloads are never repeated (`.github/workflows/deploy.yml`).
+
+`src/data/dam-daily.csv.js` reduces hourly prices to `dam-daily.csv` (zone × day: average, TB1,
+TB2, TB4, negative hours). Pages load ~1 MB of gzipped static files and are ready in well under a
+second.
 
 Generation uses three more loaders: `gen-monthly.csv` (zone × month × group, GWh, from one
 monthly-aggregated `generation_per_type` call per zone), `gen-capacity.csv` (zone × year × group,
 MW, from `installed_generation_capacity`) and `gen-profiles.csv` (zone × season × local hour ×
-group, mean MW, for the last full year). The profiles need a year of hourly data (~60 MB across
-all zones, ~30 s), so that loader reuses its cached snapshot while it is still for the right year
-and only downloads again in January.
+group, mean MW, for the last full year). The profiles need a year of hourly data per zone (~130
+MB across all zones, ~60 s), so only zones missing that year are downloaded.
 
 Residual load comes from the parameterized loader `src/data/residual/[zone].csv.js`, which
 writes one file per zone (`date,hour,price,rl`: every local hour since 2021 with its price and
@@ -60,8 +70,8 @@ load − wind − solar in MW, ~1.3 MB, ~0.4 MB gzipped), so the prices page loa
 country. It joins hourly prices (shared raw cache), `actual_load` and hourly `generation_per_type`
 on the UTC hour. Hourly generation is ~5 MB per zone-year (~500 MB for all zones since 2021), so
 the loader keeps its cached snapshot (`cache/residual/`) up to the start of the month before its
-latest month and downloads only from there (~2 s per zone a day). `RESIDUAL_FULL=1` forces a full
-re-download (~25 s per zone).
+latest month and downloads only from there (~2 s per zone a day). `RESIDUAL_FULL=1` (or
+`ENTSOE_FULL=1`) forces a full re-download (~25 s per zone).
 
 The hourly generation mix comes from `src/data/gen-hourly/[zone].csv.js` (`month,hour,group,mw`:
 average MW per generation group, and load as group `load`, at each local hour of every month since
@@ -71,7 +81,7 @@ forces a full re-download, ~17 s per zone).
 
 Capture prices come from `src/data/capture-monthly.csv.js` (`zone,month,tech,capture,base,gwh,
 hours`). It calls entsoemcp.com's server-side `capture_price` derivation (`/api/derivation`, JSON,
-local months; one ~1 s call per zone for the whole window) for solar (B16) and wind onshore and
+local months; one ~1 s call per zone) for solar (B16) and wind onshore and
 offshore (B18, B19). The server weights hourly prices by hourly output, so no hourly generation
 is downloaded. The page rolls months up into years and seasons as generation-weighted capture
 price over hour-weighted baseload (`src/components/capture.js`), never as a mean of monthly
