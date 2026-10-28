@@ -7,7 +7,8 @@
 // since 2021), far too much to download on every daily build. Rows already in the cached snapshot
 // are kept up to the start of the month before its latest month (generation and load are revised
 // for a few weeks after delivery); only the rest is downloaded again. Without a snapshot, or with
-// RESIDUAL_FULL=1, everything is downloaded. Prices come from the shared raw cache (cache/raw/).
+// RESIDUAL_FULL=1, everything is downloaded. Prices for the same days come from the shared raw
+// cache (cache/raw/).
 
 import {parseArgs} from "node:util";
 import {csvFormat, csvParse} from "d3-dsv";
@@ -29,7 +30,7 @@ const addDays = (date, n) => new Date(Date.parse(date) + n * 86_400_000).toISOSt
 
 process.stdout.write(
   await withCache(name, async () => {
-    const cached = process.env.RESIDUAL_FULL ? null : await cacheRead(name);
+    const cached = process.env.RESIDUAL_FULL || process.env.ENTSOE_FULL ? null : await cacheRead(name);
     const prev = cached ? csvParse(cached) : [];
     const last = prev.at(-1)?.date;
     const from = last ? monthStart(last, -1) : START_DATE;
@@ -48,7 +49,7 @@ process.stdout.write(
       gen = gen.concat(await downloadRows(zone, {endpoint: "generation_per_type", start: s, end: e, aggregation: "hourly"}));
     }
     const load = await downloadRows(zone, {endpoint: "actual_load", start, end, aggregation: "hourly"});
-    const prices = normaliseHourly(await hourlyRows(zone, START_DATE), zone).filter((d) => d.date >= from);
+    const prices = normaliseHourly(await hourlyRows(zone, from), zone).filter((d) => d.date >= from);
 
     const fresh = residualHourly(prices, load, gen).map((d) => ({
       date: d.date, hour: d.hour, price: Math.round(d.price * 100) / 100, rl: Math.round(d.rl)

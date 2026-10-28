@@ -4,20 +4,23 @@
 
 import {csvFormat} from "d3-dsv";
 import {withCache} from "../../lib/cache.js";
-import {CONCURRENCY, dayAfterTomorrow, downloadRows, pool} from "../../lib/entsoe.js";
+import {dayAfterTomorrow, downloadRows, rowsPerZone} from "../../lib/entsoe.js";
 import {monthlyGeneration} from "../components/gen.js";
 import {START_DATE, ZONE_KEYS} from "../components/zones.js";
 
 const round = (x) => Math.round(x * 10) / 10;
 const thisMonth = `${new Date().toISOString().slice(0, 7)}-01`;
+const monthsBack = (month, n) => new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7) - 1 - n, 1)).toISOString().slice(0, 10);
 
 process.stdout.write(
   await withCache("gen-monthly.csv", async () => {
-    const raw = await pool(ZONE_KEYS, CONCURRENCY, (zone) =>
-      downloadRows(zone, {endpoint: "generation_per_type", start: START_DATE, end: dayAfterTomorrow(), aggregation: "monthly", tz: "local"})
-    );
-    const rows = ZONE_KEYS.flatMap((zone, i) =>
-      monthlyGeneration(raw[i], thisMonth).map((d) => ({zone, month: d.month, group: d.group, gwh: round(d.gwh)}))
+    // Generation is revised for a few weeks after delivery: the last two cached months are redone.
+    const rows = await rowsPerZone("gen-monthly.csv", ZONE_KEYS, async (zone, since) =>
+      monthlyGeneration(
+        await downloadRows(zone, {endpoint: "generation_per_type", start: since ?? START_DATE, end: dayAfterTomorrow(), aggregation: "monthly", tz: "local"}),
+        thisMonth
+      ).map((d) => ({zone, month: d.month, group: d.group, gwh: round(d.gwh)})),
+      {key: "month", refreshFrom: (last) => monthsBack(last, 1)}
     );
     // Guard against a truncated upstream response replacing a good cache: 44 zones × ~5.8 years
     // × 5-8 groups.

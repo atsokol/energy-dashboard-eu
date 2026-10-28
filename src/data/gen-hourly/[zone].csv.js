@@ -18,7 +18,7 @@ const addDays = (date, n) => new Date(Date.parse(date) + n * 86_400_000).toISOSt
 
 process.stdout.write(
   await withCache(name, async () => {
-    const cached = process.env.GEN_HOURLY_FULL ? null : await cacheRead(name);
+    const cached = process.env.GEN_HOURLY_FULL || process.env.ENTSOE_FULL ? null : await cacheRead(name);
     const prev = cached ? csvParse(cached) : [];
     const last = prev.at(-1)?.month;
     const from = last ? monthStart(last, -1) : START_DATE;
