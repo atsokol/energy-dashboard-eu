@@ -74,6 +74,50 @@ export function monthlyCapture(rows, notBefore) {
   return out.sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : a.tech < b.tech ? -1 : 1));
 }
 
+// Technology of each production type in an hourly generation CSV, for zones computed here rather
+// than server-side: GB's NESO mix splits wind into transmission-connected and embedded output.
+const HOURLY_TECH = new Map([["B16", "solar"], ["B18", "wind"], ["B19", "wind"], ["NESO_WIND_TRANSMISSION", "wind"], ["NESO_WIND_EMBEDDED", "wind"]]);
+
+/**
+ * monthlyCapture's rows for a zone without the server-side derivation (GB: entsoemcp.com's
+ * capture_price runs on the ENTSO-E day-ahead price, which ended for GB in 2020), from its
+ * hourly prices (normaliseHourly output, EUR, local time) and hourly generation CSV rows joined
+ * on the UTC hour. Same definitions: capture = output-weighted price, base = mean of every priced
+ * hour of the local month, gwh = hourly MW summed, and the same coverage and noise floors.
+ */
+export function monthlyCaptureHourly(prices, genRows, notBefore) {
+  const gen = new Map(); // utc hour (ms)|tech → MW
+  for (const r of genRows) {
+    const tech = HOURLY_TECH.get(r.psr_type);
+    const mw = +r.actual_mw;
+    if (!tech || r.actual_mw === "" || !Number.isFinite(mw)) continue;
+    const key = `${Date.parse(r.ts_utc.slice(0, 19).replace(" ", "T") + "Z")}|${tech}`;
+    gen.set(key, (gen.get(key) ?? 0) + mw);
+  }
+  const base = new Map(); // month → {sum, hours}
+  const tech = new Map(); // month|tech → {value: Σ price × MW, mwh}
+  for (const p of prices) {
+    const month = p.date.slice(0, 7);
+    if (`${month}-01` >= notBefore) continue;
+    const b = base.get(month) ?? {sum: 0, hours: 0};
+    base.set(month, {sum: b.sum + p.price, hours: b.hours + 1});
+    for (const t of CAPTURE_TECHS) {
+      const mw = gen.get(`${p.ts}|${t.key}`);
+      if (!(mw > 0)) continue;
+      const a = tech.get(`${month}|${t.key}`) ?? {value: 0, mwh: 0};
+      tech.set(`${month}|${t.key}`, {value: a.value + p.price * mw, mwh: a.mwh + mw});
+    }
+  }
+  const out = [];
+  for (const [key, a] of tech) {
+    const [month, t] = key.split("|");
+    const b = base.get(month);
+    if (b.hours < daysIn(month) * 24 * MIN_COVERAGE || a.mwh < MIN_MWH || Math.abs(b.sum / b.hours) < MIN_BASE) continue;
+    out.push({month: `${month}-01`, tech: t, capture: a.value / a.mwh, base: b.sum / b.hours, gwh: a.mwh / 1000, hours: b.hours});
+  }
+  return out.sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : a.tech < b.tech ? -1 : 1));
+}
+
 // ---------------------------------------------------------------------------------------------
 // Page roll-ups
 // ---------------------------------------------------------------------------------------------

@@ -15,12 +15,16 @@ import {localTime} from "./dam.js";
 // the colours (style.css): it keeps similar hues apart (light-blue hydro from blue wind, brown coal
 // from orange gas) so every pair of adjacent stacked layers passes the colour-vision checks.
 // B21-B24 are grid assets, not generation, and are dropped.
+//
+// GB's NESO generation mix uses the same B codes where they match, plus its own: hydro, and wind
+// split into transmission-connected and embedded (modelled) output, which fold in here. Its net
+// imports and net storage are not generation and are dropped like B21-B24.
 export const GEN_GROUPS = [
   {key: "nuclear", label: "Nuclear", psr: ["B14"]},
   {key: "coal", label: "Coal & lignite", psr: ["B02", "B03", "B05", "B07", "B08"]},
-  {key: "hydro", label: "Hydro", psr: ["B10", "B11", "B12", "B13"]},
+  {key: "hydro", label: "Hydro", psr: ["B10", "B11", "B12", "B13", "NESO_HYDRO"]},
   {key: "gas", label: "Gas", psr: ["B04"]},
-  {key: "wind", label: "Wind", psr: ["B18", "B19"]},
+  {key: "wind", label: "Wind", psr: ["B18", "B19", "NESO_WIND_TRANSMISSION", "NESO_WIND_EMBEDDED"]},
   {key: "bio", label: "Biomass & other RES", psr: ["B01", "B09", "B15", "B17"]},
   {key: "solar", label: "Solar", psr: ["B16"]},
   {key: "other", label: "Other", psr: ["B06", "B20", "B25", "B99_unknown"]}

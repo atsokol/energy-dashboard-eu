@@ -13,14 +13,14 @@ import {ZONE_KEYS, ZONES, zoneByKey} from "./zones.js";
 // Sequential blue ramp (validated reference palette, steps 100 → 700) for magnitude on the maps.
 const RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"];
 const ACCENT = "#2a78d6";
-const SOURCE = "Source: ENTSO-E Transparency Platform via entsoemcp.com";
-const FUEL_SOURCE = "Sources: ENTSO-E Transparency Platform via entsoemcp.com; THE gas and EUA auction prices: Energy-Charts (Fraunhofer ISE)";
+const SOURCE = "Sources: ENTSO-E Transparency Platform; GB: LCCC, NESO, Elexon BMRS; via entsoemcp.com";
+const FUEL_SOURCE = `${SOURCE}; THE gas and EUA auction prices: Energy-Charts (Fraunhofer ISE)`;
 const GAS_COST = "gas-plant cost (2 × THE gas + 0.4 × EUA)";
 
 // Validated categorical palette, in its CVD-safe order.
 const CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
 
-// Hue slot per selected zone, kept for the life of the page. Forty-four zones cannot each own one of
+// Hue slot per selected zone, kept for the life of the page. Forty-five zones cannot each own one of
 // eight hues without collisions, so a zone takes the first free slot when it is selected and keeps
 // it until deselected: adding or removing a country never repaints the others, and up to eight
 // selected countries are always distinct. A ninth reuses a hue (its direct label still names it).

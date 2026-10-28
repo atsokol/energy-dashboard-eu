@@ -7,6 +7,7 @@ import {csvFormat, csvParse} from "d3-dsv";
 import {cacheRead, withCache} from "../../../lib/cache.js";
 import {dayAfterTomorrow, downloadRows} from "../../../lib/entsoe.js";
 import {monthHourProfiles} from "../../components/gen.js";
+import {gbLoad} from "../../components/residual.js";
 import {START_DATE, zoneByKey} from "../../components/zones.js";
 
 const {values: {zone}} = parseArgs({options: {zone: {type: "string"}}});
@@ -33,7 +34,8 @@ process.stdout.write(
       gen = gen.concat(await downloadRows(zone, {endpoint: "generation_per_type", start: s, end: e, aggregation: "hourly"}));
       load = load.concat(await downloadRows(zone, {endpoint: "actual_load", start: s, end: e, aggregation: "hourly"}));
     }
-    const fresh = monthHourProfiles(gen, load, zone)
+    // GB: transmission demand plus the embedded output it cannot see (gbLoad).
+    const fresh = monthHourProfiles(gen, zone === "GB" ? gbLoad(load, gen) : load, zone)
       .filter((d) => d.month >= from.slice(0, 7))
       .map((d) => ({...d, mw: Math.round(d.mw)}));
     if (!fresh.length && !kept.length) throw new Error("no generation or load hours");

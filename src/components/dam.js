@@ -20,6 +20,19 @@ const RON_PER_EUR = {
   "2021-04": 4.92313, "2021-05": 4.925, "2021-06": 4.923795
 };
 
+// GB prices are in GBP throughout. Its monthly ECB reference rates are fetched at build time
+// (lib/fx.js) and handed in with setGbpRates; a month past the latest published one (the month in
+// progress) takes the latest rate.
+const GBP_PER_EUR = new Map();
+let gbpLatest = null;
+
+/** Load GBP per EUR by month: a Map from "YYYY-MM" to the month's average rate. */
+export function setGbpRates(rates) {
+  GBP_PER_EUR.clear();
+  for (const [month, rate] of rates) GBP_PER_EUR.set(month, rate);
+  gbpLatest = [...GBP_PER_EUR.keys()].sort().at(-1) ?? null;
+}
+
 /** Price in EUR/MWh, or NaN when the row's currency cannot be converted. */
 export function toEur(price, currency, month) {
   // A blank currency is EUR: entsoemcp.com only started labelling rows mid-2026, and every
@@ -27,6 +40,7 @@ export function toEur(price, currency, month) {
   if (!currency || currency === "EUR") return price;
   if (currency === "BGN") return price / BGN_PER_EUR;
   if (currency === "RON" && RON_PER_EUR[month]) return price / RON_PER_EUR[month];
+  if (currency === "GBP" && gbpLatest) return price / GBP_PER_EUR.get(month > gbpLatest ? gbpLatest : month);
   return NaN;
 }
 
@@ -63,8 +77,9 @@ export function localTime(ms, zone) {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Normalise rows of an entsoemcp.com hourly CSV (`ts_utc,currency,eur_per_mwh`) for one zone into
- * `{date, hour, price, ts}` in local market time and EUR; `ts` is the hour's UTC start in ms.
+ * Normalise rows of an entsoemcp.com hourly CSV (`ts_utc,currency,eur_per_mwh`, or GB's IMRP
+ * `ts_utc,gbp_per_mwh`) for one zone into `{date, hour, price, ts}` in local market time and EUR;
+ * `ts` is the hour's UTC start in ms.
  *
  * Duplicate timestamps occur where the feed holds both a labelled and an unlabelled copy of the
  * same hour (2026-07-15 07:00Z in several zones, with different values); the labelled row is the
@@ -73,12 +88,14 @@ export function localTime(ms, zone) {
 export function normaliseHourly(rows, zone) {
   const byTs = new Map();
   for (const r of rows) {
-    const price = +r.eur_per_mwh;
-    if (r.eur_per_mwh === "" || r.eur_per_mwh == null || !Number.isFinite(price)) continue;
+    const raw = r.eur_per_mwh ?? r.gbp_per_mwh;
+    const currency = r.currency ?? (r.gbp_per_mwh != null ? "GBP" : "");
+    const price = +raw;
+    if (raw === "" || raw == null || !Number.isFinite(price)) continue;
     const ts = r.ts_utc.slice(0, 19).replace(" ", "T") + "Z";
     const prev = byTs.get(ts);
-    if (prev && prev.currency && !r.currency) continue;
-    byTs.set(ts, {currency: r.currency, price});
+    if (prev && prev.currency && !currency) continue;
+    byTs.set(ts, {currency, price});
   }
   const out = [];
   for (const [ts, {currency, price}] of byTs) {
@@ -159,15 +176,17 @@ const addDays = (s, n) => iso(new Date(Date.parse(s) + n * 86_400_000));
 const fmtDate = (s, opts) => new Date(s + "T00:00:00Z").toLocaleDateString("en-GB", {timeZone: "UTC", ...opts});
 
 /**
- * The market day the maps anchor on: the latest day every reasonably current zone has published.
- * A zone more than a week behind the leader is treated as stalled and excluded, so one dormant
- * feed cannot freeze the whole map; it simply shows no value for recent periods.
+ * The market day the maps anchor on: the latest day every current zone has published. A zone
+ * more than a day behind the leader is left out, so one late or dormant feed cannot hold the
+ * whole map back: GB's IMRP lands 2-4 days after delivery, while the coupled zones publish the
+ * next day's prices each afternoon. A late zone shows no value until its days arrive (a period in
+ * progress still needs 80% of its days).
  */
 export function anchorDay(daily) {
   const latest = new Map();
   for (const d of daily) if (!(latest.get(d.zone) >= d.date)) latest.set(d.zone, d.date);
   const lead = [...latest.values()].sort().at(-1);
-  const current = [...latest.values()].filter((d) => d >= addDays(lead, -7));
+  const current = [...latest.values()].filter((d) => d >= addDays(lead, -1));
   return current.sort()[0];
 }
 

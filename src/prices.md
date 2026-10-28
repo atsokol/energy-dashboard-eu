@@ -5,9 +5,10 @@ toc: true
 
 # Day-ahead prices
 
-Hourly **day-ahead market (DAM)** prices for 44 zones from 2021 (ENTSO-E via
-[entsoemcp.com](https://entsoemcp.com)), in EUR/MWh on local market days. Early BGN and RON prices
-are converted to EUR.
+Hourly **day-ahead market (DAM)** prices for 45 zones from 2021 (ENTSO-E via
+[entsoemcp.com](https://entsoemcp.com)), in EUR/MWh on local market days. Early BGN and RON prices,
+and GB's (LCCC auction reference price, in GBP, published 2-4 days after delivery), are converted
+to EUR.
 
 ```js
 import {START_DATE, ZONES, zonesIn} from "./components/zones.js"
@@ -139,6 +140,7 @@ const RESIDUAL = {
   NL: FileAttachment("./data/residual/NL.csv"),
   AT: FileAttachment("./data/residual/AT.csv"),
   CH: FileAttachment("./data/residual/CH.csv"),
+  GB: FileAttachment("./data/residual/GB.csv"),
   IE_SEM: FileAttachment("./data/residual/IE_SEM.csv"),
   ES: FileAttachment("./data/residual/ES.csv"),
   PT: FileAttachment("./data/residual/PT.csv"),
@@ -291,6 +293,7 @@ const GEN_HOURLY = {
   NL: FileAttachment("./data/gen-hourly/NL.csv"),
   AT: FileAttachment("./data/gen-hourly/AT.csv"),
   CH: FileAttachment("./data/gen-hourly/CH.csv"),
+  GB: FileAttachment("./data/gen-hourly/GB.csv"),
   IE_SEM: FileAttachment("./data/gen-hourly/IE_SEM.csv"),
   ES: FileAttachment("./data/gen-hourly/ES.csv"),
   PT: FileAttachment("./data/gen-hourly/PT.csv"),

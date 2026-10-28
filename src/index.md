@@ -4,10 +4,12 @@ title: EU Power Markets
 
 # EU power markets dashboard
 
-Day-ahead prices, battery spreads and generation mix for 44 bidding zones across Europe, from
-2021: every zone with day-ahead prices on ENTSO-E via [entsoemcp.com](https://entsoemcp.com). Italy,
-Norway, Sweden and Denmark appear zone by zone. Bosnia & Herzegovina, Great Britain and Cyprus are
-left out: there are no ENTSO-E day-ahead prices for them since 2021.
+Day-ahead prices, battery spreads and generation mix for 45 bidding zones across Europe, from
+2021: every zone with day-ahead prices on ENTSO-E via [entsoemcp.com](https://entsoemcp.com), and
+Great Britain, which left ENTSO-E at Brexit, from its own publishers (LCCC auction prices in GBP
+converted to EUR, NESO generation, Elexon demand). Italy, Norway, Sweden and Denmark appear zone
+by zone. Bosnia & Herzegovina and Cyprus are left out: there are no day-ahead prices for them
+since 2021.
 
 ## Dashboards
 

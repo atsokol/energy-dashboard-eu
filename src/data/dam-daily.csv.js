@@ -6,6 +6,7 @@
 import {csvFormat} from "d3-dsv";
 import {withCache} from "../../lib/cache.js";
 import {hourlyRows, rowsPerZone} from "../../lib/entsoe.js";
+import {useGbpRates} from "../../lib/fx.js";
 import {dailyMetrics, normaliseHourly} from "../components/dam.js";
 import {START_DATE, ZONE_KEYS} from "../components/zones.js";
 
@@ -14,6 +15,7 @@ const addDays = (date, n) => new Date(Date.parse(date) + n * 86_400_000).toISOSt
 
 process.stdout.write(
   await withCache("dam-daily.csv", async () => {
+    await useGbpRates(); // GB prices are in GBP
     // Published prices are final; the last week is refreshed in case of late corrections.
     const rows = await rowsPerZone("dam-daily.csv", ZONE_KEYS, async (zone, since) =>
       dailyMetrics(normaliseHourly(await hourlyRows(zone, since ?? START_DATE), zone))

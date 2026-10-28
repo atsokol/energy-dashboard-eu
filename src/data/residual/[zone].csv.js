@@ -15,7 +15,8 @@ import {csvFormat, csvParse} from "d3-dsv";
 import {cacheRead, withCache} from "../../../lib/cache.js";
 import {dayAfterTomorrow, downloadRows, hourlyRows} from "../../../lib/entsoe.js";
 import {normaliseHourly} from "../../components/dam.js";
-import {residualHourly} from "../../components/residual.js";
+import {gbLoad, residualHourly} from "../../components/residual.js";
+import {useGbpRates} from "../../../lib/fx.js";
 import {START_DATE, zoneByKey} from "../../components/zones.js";
 
 const {values: {zone}} = parseArgs({options: {zone: {type: "string"}}});
@@ -48,7 +49,12 @@ process.stdout.write(
     for (const [s, e] of chunks) {
       gen = gen.concat(await downloadRows(zone, {endpoint: "generation_per_type", start: s, end: e, aggregation: "hourly"}));
     }
-    const load = await downloadRows(zone, {endpoint: "actual_load", start, end, aggregation: "hourly"});
+    let load = await downloadRows(zone, {endpoint: "actual_load", start, end, aggregation: "hourly"});
+    // GB: transmission demand plus the embedded output it cannot see; prices in GBP.
+    if (zone === "GB") {
+      load = gbLoad(load, gen);
+      await useGbpRates();
+    }
     const prices = normaliseHourly(await hourlyRows(zone, from), zone).filter((d) => d.date >= from);
 
     const fresh = residualHourly(prices, load, gen).map((d) => ({

@@ -7,14 +7,17 @@
 // UTC offset: every zone here follows the EU summer-time rule, so standard offset + rule gives
 // local market time without an Intl lookup per row (see localTime in dam.js).
 //
-// Left out, as entsoemcp.com reports no day-ahead price for them since 2021: Bosnia &
-// Herzegovina (never published), Great Britain (left the coupled market at Brexit) and Cyprus.
+// Great Britain left ENTSO-E's day-ahead coupling at Brexit (its ENTSO-E prices end 2020-12-31,
+// generation and load in 2021), so its series come from the successors entsoemcp.com carries:
+// the LCCC IMRP auction price (GBP), NESO's generation mix and Elexon's transmission demand
+// (SUCCESSORS in lib/entsoe.js). Left out, as there is no day-ahead price for them since 2021:
+// Bosnia & Herzegovina (never published) and Cyprus.
 //
-// No colours here: 44 zones exceed the eight validated categorical hues, so line charts assign
+// No colours here: 45 zones exceed the eight validated categorical hues, so line charts assign
 // hues per selection instead (seriesColors in charts.js).
 
 /** Region filter offered on every page, in display order. */
-export const REGIONS = ["Western Europe", "Iberia", "Italy", "Nordics", "Baltics", "Central-East Europe", "South-East Europe"];
+export const REGIONS = ["Western Europe", "British Isles", "Iberia", "Italy", "Nordics", "Baltics", "Central-East Europe", "South-East Europe"];
 
 export const ZONES = [
   {key: "DE_LU", name: "Germany–Luxembourg", short: "DE-LU", region: "Western Europe", utc: 1},
@@ -23,7 +26,8 @@ export const ZONES = [
   {key: "NL", name: "Netherlands", short: "NL", region: "Western Europe", utc: 1},
   {key: "AT", name: "Austria", short: "AT", region: "Western Europe", utc: 1},
   {key: "CH", name: "Switzerland", short: "CH", region: "Western Europe", utc: 1},
-  {key: "IE_SEM", name: "Ireland (SEM)", short: "IE", region: "Western Europe", utc: 0},
+  {key: "GB", name: "Great Britain", short: "GB", region: "British Isles", utc: 0},
+  {key: "IE_SEM", name: "Ireland (SEM)", short: "IE", region: "British Isles", utc: 0},
   {key: "ES", name: "Spain", short: "ES", region: "Iberia", utc: 1},
   {key: "PT", name: "Portugal", short: "PT", region: "Iberia", utc: 0},
   {key: "IT_NORD", name: "Italy North", short: "IT-N", region: "Italy", utc: 1},

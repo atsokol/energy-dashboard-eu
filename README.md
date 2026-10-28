@@ -2,7 +2,8 @@
 
 Observable Framework site for GitHub Pages: day-ahead prices and TB1/TB2/TB4 battery-arbitrage
 spreads for all 44 bidding zones with ENTSO-E day-ahead prices (Western Europe, Iberia, the seven
-Italian zones, the Nordics zone by zone, the Baltics, Central-East and South-East Europe), from 2021.
+Italian zones, the Nordics zone by zone, the Baltics, Central-East and South-East Europe), plus
+Great Britain from its post-Brexit publishers, from 2021.
 Data: ENTSO-E Transparency Platform via [entsoemcp.com](https://entsoemcp.com) (anonymous API,
 no key).
 
@@ -109,18 +110,32 @@ node test/serve-dist.mjs   # serve the built dist/ like GitHub Pages (gzip) on :
 
 ## Data notes
 
-- **Zones** (`src/components/zones.js`): Western Europe = DE-LU, FR, BE, NL, AT, CH, IE (SEM);
-  Iberia = ES, PT; Italy = NORD, CNOR, CSUD, SUD, CALA, SICI, SARD; Nordics = DK1-2, NO1-5, SE1-4,
+- **Zones** (`src/components/zones.js`): Western Europe = DE-LU, FR, BE, NL, AT, CH; British
+  Isles = GB, IE (SEM); Iberia = ES, PT; Italy = NORD, CNOR, CSUD, SUD, CALA, SICI, SARD; Nordics = DK1-2, NO1-5, SE1-4,
   FI; Baltics = EE, LV, LT; Central-East Europe = PL, CZ, SK, HU, SI, HR, RO, BG; South-East
   Europe = GR, RS, ME, MK, AL. Bosnia & Herzegovina publishes no DA price on ENTSO-E, and
-  entsoemcp.com has none for Great Britain (post-Brexit) or Cyprus since 2021, so they are grey
-  context. AL, ME and MK start in 2023.
+  Cyprus none since 2021, so they are grey context. AL, ME and MK start in 2023.
+- **Great Britain**: ENTSO-E's GB series end at Brexit (prices 2020-12-31, generation and load
+  2021), so GB uses the successors entsoemcp.com serves (`SUCCESSORS` in `lib/entsoe.js`):
+  - **Price**: the LCCC CfD Intermittent Market Reference Price (`day_ahead_price_imrp`), i.e. the
+    volume-weighted EPEX SPOT GB and N2EX day-ahead auctions. It is penny-identical to ENTSO-E's
+    GB series where they overlap. It lands 2-4 days after delivery, so GB shows no value for the
+    most recent days.
+  - **Generation**: NESO's generation mix (`generation_mix`). Its solar and embedded wind are
+    NESO's modelled estimates, since GB solar is ~99% distribution-connected.
+  - **Load**: Elexon's transmission demand (INDO) plus NESO's embedded wind and solar, i.e. total
+    demand like other zones' `actual_load`.
+  - **Capture prices**: computed in the loader from hourly prices and generation, because the
+    server-side derivation uses the ended ENTSO-E price.
+  - **Capacity**: ENTSO-E's last GB snapshot (2021), labelled with its year.
 - **Map shapes**: `src/data/europe.geo.json` holds bidding-zone outlines (`properties.zone` = zone
   key; context countries have `zone: null`), derived from Electricity Maps' `geo/world.geojson`
   (github.com/electricitymaps/electricitymaps-contrib), simplified with mapshaper. Check that
   project's licence before relying on the shapes in a public deployment.
 - **Currency**: BG published in BGN until 2022-01-21 (converted at the 1.95583 peg), RO in RON
-  until 2021-06-17 (ECB monthly rates). Unlabelled rows are EUR.
+  until 2021-06-17 (ECB monthly rates). GB prices are in GBP, converted at ECB monthly average
+  reference rates fetched at build time (`lib/fx.js`, cached in `cache/fx-gbp.csv`; the month in
+  progress uses the latest published month). Unlabelled rows are EUR.
 - **Time**: all metrics use the zone's local market day and hour.
 - **TBx** = mean of the day's x highest hourly prices − mean of the x lowest, in EUR/MWh (days with
   ≥ 22 hours). This is the UA dashboard's definition. entsoemcp.com's `tb_spread` uses
