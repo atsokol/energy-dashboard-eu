@@ -124,8 +124,7 @@ monthlyPriceChart({d3, Plot, width, rows: monthly.filter((d) => d.month >= `${fr
 Residual load (load − wind − solar) is what dispatchable plants, storage and imports must cover;
 where solar cuts midday residual load, the price follows. **By year**: the chosen month, one line
 per year, on scales fixed across months. **By month**: the chosen year built up month by month,
-coloured by season (blue winter, green spring, red summer, amber autumn), on scales fixed for the
-year. Press Play to step through the months once, or drag the slider. All month and year controls
+coloured by season (blue winter, red summer), on scales fixed for the year. Press Play to step through the months once, or drag the slider. All month and year controls
 on this page are linked.
 
 ```js

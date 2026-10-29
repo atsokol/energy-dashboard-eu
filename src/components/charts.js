@@ -554,24 +554,20 @@ function linkScatter(d3, chart, {dots, years, selection, brush, fillOpacity, id 
 }
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-// Four-season month palette, one anchor per season's middle month: winter blue (Jan), spring
-// green (Apr), summer red (Jul), autumn amber (Oct); opposite seasons are complementary pairs
-// (green against red, amber against blue). The months between are picked by hand rather than
-// blended, since a Lab blend turns May-June olive-brown and November grey: blue to teal to green,
-// yellow-green into summer's orange-reds, orange to amber, and an autumn brown back to a light
-// winter blue in December, so the year closes as a loop.
-const MONTH_COLD = "#2f5aa8", MONTH_WARM = "#d7301f"; // also the spread band's bottom and top legs
-const MONTH_COLORS = [
-  MONTH_COLD, "#2b7bba", "#2a9d8f", // Jan Feb Mar
-  "#2e9a4e", "#7cb342", "#ef6c3a", // Apr May Jun
-  MONTH_WARM, "#b8321a", "#ea7a12", // Jul Aug Sep
-  "#e39b00", "#b9894a", "#5b7fbf" // Oct Nov Dec
-];
+// Cyclic two-colour month palette: cold blue in mid-winter (Jan), warm red in mid-summer (Jul),
+// passing through a light neutral grey at the equinox months (Apr, Oct; pure white would vanish
+// on the light theme), blended along a cosine of the month so Dec sits next to Jan and spring
+// mirrors autumn.
+const MONTH_COLD = "#2f5aa8", MONTH_MID = "#c4c4c4", MONTH_WARM = "#d7301f";
+function monthCycle(d3) {
+  const mix = d3.piecewise(d3.interpolateLab, [MONTH_COLD, MONTH_MID, MONTH_WARM]);
+  return (t) => mix((1 - Math.cos((2 * Math.PI * (t * 11)) / 12)) / 2); // t: 0 = Jan, 1 = Dec
+}
 
 /**
  * One year's months built up one at a time: the average of `value` by local hour of day for each
- * month up to `upTo` ("01"-"12"), coloured on a cyclic seasonal palette (MONTH_COLORS: blue
- * winter, green spring, red summer, amber autumn), the newest month drawn heavier and labelled. `rows`: hourlyProfiles rows of one year.
+ * month up to `upTo` ("01"-"12"), coloured on a cyclic seasonal palette (monthCycle: cold in
+ * winter, warm in summer), the newest month drawn heavier and labelled. `rows`: hourlyProfiles rows of one year.
  * `domain` (display units) fixes the y scale so the frames compare.
  */
 export function monthBuildChart({d3, Plot, rows, upTo, value, k = 1, domain, title, subtitle, label, format = fmt1, width}) {
@@ -584,7 +580,10 @@ export function monthBuildChart({d3, Plot, rows, upTo, value, k = 1, domain, tit
     width, height: 300, marginTop: 20, marginBottom: 35, marginLeft: 45, marginRight: 40,
     x: {label: "hour of day", domain: [0, 23], ticks: [0, 6, 12, 18, 23], line: true},
     y: {grid: true, nice: true, label, domain},
-    color: {type: "ordinal", domain: d3.range(1, 13), range: MONTH_COLORS, legend: true, tickFormat: (m) => MONTH_ABBR[m - 1]},
+    color: {
+      type: "linear", domain: [1, 12], interpolate: monthCycle(d3),
+      legend: true, ticks: [1, 4, 7, 10, 12], tickFormat: (m) => MONTH_ABBR[m - 1], label: null
+    },
     marks: [
       Plot.ruleY([0]),
       Plot.lineY(data, {
