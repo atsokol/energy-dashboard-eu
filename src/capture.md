@@ -14,9 +14,9 @@ converted to EUR. Wind is onshore and offshore together.
 
 ```js
 import {zonesIn} from "./components/zones.js"
-import {annualFactors, monthlyFactors, pivotDomain, seasonalFactors, withShares} from "./components/capture.js"
+import {annualFactors, curtailmentEffect, monthlyFactors, pivotDomain, seasonalFactors, withShares} from "./components/capture.js"
 import {linkPeriod, linkValue, periodLinks, regionInput, rememberZone, savedZone} from "./components/linking.js"
-import {captureLines, captureShareScatter, linkMapToInput, zoneMap} from "./components/charts.js"
+import {captureLines, captureShareScatter, curtailmentChart, linkMapToInput, zoneMap} from "./components/charts.js"
 ```
 
 ```js
@@ -132,10 +132,12 @@ const zones = view(Inputs.checkbox(new Map(shownZones.map((z) => [z.short, z.key
 ```
 
 ```js
-// One y scale per pair, so solar and wind compare directly; 100% always in view.
+// One y scale per pair, so solar and wind compare directly; 100% always in view, and the top cut
+// at 200% so one thin month (a few MW of wind) cannot flatten every other line.
+const CAPTURE_MAX = 2
 const lineDomain = (rows) => {
   const [lo, hi] = d3.extent(rows, (d) => d.value);
-  return [Math.min(lo ?? 1, 0.95) - 0.02, Math.max(hi ?? 1, 1.05) + 0.02];
+  return [Math.min(lo ?? 1, 0.95) - 0.02, Math.min(CAPTURE_MAX, Math.max(hi ?? 1, 1.05) + 0.02)];
 }
 const annualShown = annual.filter((d) => zones.includes(d.zone))
 const seasonalShown = seasonal.filter((d) => zones.includes(d.zone))
@@ -181,7 +183,7 @@ const shareYears = [...new Set(shares.map((d) => d.period.slice(0, 4)))].sort()
 const shareSelection = {year: null}
 // Fixed across countries: every zone's months set the frame.
 const shareX = (tech) => [0, (d3.max(shares, (d) => (d.tech === tech ? d.share : 0)) ?? 0.1) * 1.05]
-const shareY = [Math.min(0.95, d3.min(shares, (d) => d.value)) - 0.02, Math.max(1.05, d3.max(shares, (d) => d.value)) + 0.02]
+const shareY = [Math.min(0.95, d3.min(shares, (d) => d.value)) - 0.02, Math.min(CAPTURE_MAX, Math.max(1.05, d3.max(shares, (d) => d.value)) + 0.02)]
 ```
 
 ```js
@@ -190,3 +192,95 @@ pair(...TECHS.map((tech) => captureShareScatter({
   width: halfWidth, xDomain: shareX(tech), yDomain: shareY, selection: shareSelection
 })))
 ```
+
+## Capture and curtailment
+
+What a plant earns once negative prices are counted in. A plant without support for negative
+hours stops producing when the day-ahead price falls below zero; its effective value, per MWh it
+could have produced, is then the capture factor of the output it still sells (blue: above or
+below the baseload line) less the output it gives up in negative hours (orange). The hollow dot is
+the ordinary capture factor, which sells through those hours at a loss. Hourly prices and output;
+a year needs all twelve months, except the year to date.
+
+```js
+zoneInput
+```
+
+```js
+// One file per zone (the residual-load files of the prices page, which carry hourly solar and
+// wind output), so the page loads only the selected country; FileAttachment needs literal paths.
+const RESIDUAL = {
+  DE_LU: FileAttachment("./data/residual/DE_LU.csv"),
+  FR: FileAttachment("./data/residual/FR.csv"),
+  BE: FileAttachment("./data/residual/BE.csv"),
+  NL: FileAttachment("./data/residual/NL.csv"),
+  AT: FileAttachment("./data/residual/AT.csv"),
+  CH: FileAttachment("./data/residual/CH.csv"),
+  IE_SEM: FileAttachment("./data/residual/IE_SEM.csv"),
+  ES: FileAttachment("./data/residual/ES.csv"),
+  PT: FileAttachment("./data/residual/PT.csv"),
+  IT_NORD: FileAttachment("./data/residual/IT_NORD.csv"),
+  IT_CNOR: FileAttachment("./data/residual/IT_CNOR.csv"),
+  IT_CSUD: FileAttachment("./data/residual/IT_CSUD.csv"),
+  IT_SUD: FileAttachment("./data/residual/IT_SUD.csv"),
+  IT_CALA: FileAttachment("./data/residual/IT_CALA.csv"),
+  IT_SICI: FileAttachment("./data/residual/IT_SICI.csv"),
+  IT_SARD: FileAttachment("./data/residual/IT_SARD.csv"),
+  DK_1: FileAttachment("./data/residual/DK_1.csv"),
+  DK_2: FileAttachment("./data/residual/DK_2.csv"),
+  NO_1: FileAttachment("./data/residual/NO_1.csv"),
+  NO_2: FileAttachment("./data/residual/NO_2.csv"),
+  NO_3: FileAttachment("./data/residual/NO_3.csv"),
+  NO_4: FileAttachment("./data/residual/NO_4.csv"),
+  NO_5: FileAttachment("./data/residual/NO_5.csv"),
+  SE_1: FileAttachment("./data/residual/SE_1.csv"),
+  SE_2: FileAttachment("./data/residual/SE_2.csv"),
+  SE_3: FileAttachment("./data/residual/SE_3.csv"),
+  SE_4: FileAttachment("./data/residual/SE_4.csv"),
+  FI: FileAttachment("./data/residual/FI.csv"),
+  EE: FileAttachment("./data/residual/EE.csv"),
+  LV: FileAttachment("./data/residual/LV.csv"),
+  LT: FileAttachment("./data/residual/LT.csv"),
+  PL: FileAttachment("./data/residual/PL.csv"),
+  CZ: FileAttachment("./data/residual/CZ.csv"),
+  SK: FileAttachment("./data/residual/SK.csv"),
+  HU: FileAttachment("./data/residual/HU.csv"),
+  SI: FileAttachment("./data/residual/SI.csv"),
+  HR: FileAttachment("./data/residual/HR.csv"),
+  RO: FileAttachment("./data/residual/RO.csv"),
+  BG: FileAttachment("./data/residual/BG.csv"),
+  GR: FileAttachment("./data/residual/GR.csv"),
+  RS: FileAttachment("./data/residual/RS.csv"),
+  ME: FileAttachment("./data/residual/ME.csv"),
+  MK: FileAttachment("./data/residual/MK.csv"),
+  AL: FileAttachment("./data/residual/AL.csv")
+}
+```
+
+```js
+const residualRaw = await RESIDUAL[zone].csv()
+```
+
+```js
+// Older snapshots have no solar and wind columns: no curtailment rows until the next build.
+const curtailment = residualRaw.columns.includes("solar")
+  ? curtailmentEffect(residualRaw.map((d) => ({date: d.date, price: +d.price, solar: +d.solar, wind: +d.wind})), {openYear})
+  : []
+// One scale for both technologies, cut at 200% like the lines above.
+const curtailDomain = [
+  Math.min(0.5, d3.min(curtailment, (d) => Math.min(d.evf, d.cf)) ?? 0.5) - 0.05,
+  Math.min(CAPTURE_MAX, Math.max(1.1, d3.max(curtailment, (d) => d.cfPos) ?? 1) + 0.05)
+]
+```
+
+```js
+curtailment.length
+  ? pair(...TECHS.map((tech) => {
+      const rows = curtailment.filter((d) => d.tech === tech);
+      return rows.length
+        ? curtailmentChart({d3, Plot, rows, tech, zone, openYear, lastMonthShort, width: halfWidth, domain: curtailDomain})
+        : html`<p>No ${tech} output reported for this country.</p>`;
+    }))
+  : html`<p>No hourly solar and wind output for this country yet.</p>`
+```
+
