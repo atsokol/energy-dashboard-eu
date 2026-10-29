@@ -74,22 +74,77 @@ export function monthlyCapture(rows, notBefore) {
   return out.sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : a.tech < b.tech ? -1 : 1));
 }
 
+/**
+ * Output and revenue in negative-price hours, per local month and technology, from one zone's
+ * hourly prices (normaliseHourly output: EUR, local date, UTC `ts`) and hourly
+ * `generation_per_type` rows joined on the UTC hour, the same join the server's capture_price
+ * makes (checked to the fourth decimal). Returns Map("YYYY-MM|tech" → {gwh, value, negGwh,
+ * negValue}): all output and its revenue (EUR), and the part in hours priced below zero. `gwh`
+ * and `value` are for cross-checking against the server's figures.
+ */
+export function negativeHourTotals(prices, genRows) {
+  const gen = new Map(); // utc ms|tech → MW (= MWh in the hour)
+  for (const r of genRows) {
+    const tech = techOfPsr.get(r.psr_type);
+    const mw = +r.actual_mw;
+    if (!tech || r.actual_mw === "" || r.actual_mw == null || !Number.isFinite(mw)) continue;
+    const key = `${Date.parse(r.ts_utc.slice(0, 19).replace(" ", "T") + "Z")}|${tech}`;
+    gen.set(key, (gen.get(key) ?? 0) + mw);
+  }
+  const out = new Map();
+  for (const p of prices) {
+    for (const {key: tech} of CAPTURE_TECHS) {
+      const mwh = gen.get(`${p.ts}|${tech}`);
+      if (mwh === undefined) continue;
+      const id = `${p.date.slice(0, 7)}|${tech}`;
+      let a = out.get(id);
+      if (!a) out.set(id, (a = {gwh: 0, value: 0, negGwh: 0, negValue: 0}));
+      a.gwh += mwh / 1000; a.value += p.price * mwh;
+      if (p.price < 0) { a.negGwh += mwh / 1000; a.negValue += p.price * mwh; }
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Page roll-ups
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Capture factor over a set of one zone's months for one technology: the generation-weighted
- * capture price over the hour-weighted baseload price. Averaging the monthly factors instead
- * would give a low-output winter month as much say as a high-output summer one.
+ * Capture factor over a set of one zone's months for one technology, from summed totals: with B
+ * the baseload (hour-weighted mean price), G the output and R its revenue,
+ *
+ *   value (CF) = (R / G) / B
+ *
+ * Averaging monthly factors instead would give a low-output winter month as much say as a
+ * high-output summer one. When every month carries its negative-hour totals (`neg_gwh` G₋ and
+ * `neg_capture`, the average price of that output, so R₋ = neg_capture × G₋), CF also splits
+ * exactly into three terms, in fractions of baseload, with L = G₋ / G:
+ *
+ *   CF − 1 = (1 − L)(CF₊ − 1)   profile: the output sold in positive hours, against baseload
+ *          − L                  output in negative hours, as if it earned nothing
+ *          + L · CF₋             negative prices paid on that output (≤ 0)
+ *
+ * where CF₊ = (R − R₋)/(G − G₋)/B and CF₋ = R₋/G₋/B. A plant that stops in negative hours earns
+ * the first two: `curtailed` = 1 + profile − L.
  */
 export function captureFactor(months) {
-  let value = 0, gwh = 0, baseValue = 0, hours = 0;
+  let value = 0, gwh = 0, baseValue = 0, hours = 0, negGwh = 0, negValue = 0, split = true;
   for (const d of months) {
     value += d.capture * d.gwh; gwh += d.gwh;
     baseValue += d.base * d.hours; hours += d.hours;
+    if (Number.isFinite(d.neg_gwh) && Number.isFinite(d.neg_capture)) {
+      negGwh += d.neg_gwh; negValue += d.neg_capture * d.neg_gwh;
+    } else split = false;
   }
-  return {capture: value / gwh, base: baseValue / hours, value: value / gwh / (baseValue / hours), gwh};
+  const base = baseValue / hours;
+  const out = {capture: value / gwh, base, value: value / gwh / base, gwh};
+  // The terms are added only when they exist, so rows without them carry no blank fields.
+  if (!split) return out;
+  const lost = negGwh / gwh;
+  const profile = gwh > negGwh ? (1 - lost) * ((value - negValue) / (gwh - negGwh) / base - 1) : 0;
+  const negPaid = negGwh > 0 ? lost * (negValue / negGwh / base) : 0;
+  return {...out, lost, profile, negOutput: -lost, negPaid, curtailed: 1 + profile - lost};
 }
 
 function rollUp(rows, periodOf, need) {
@@ -191,64 +246,3 @@ export function pivotDomain(values, lo = 0.02, hi = 0.98) {
   const reach = Math.max(1 - quantileSorted(sorted, lo), quantileSorted(sorted, hi) - 1, 0.05);
   return [1 - reach, 1 + reach];
 }
-
-// ---------------------------------------------------------------------------------------------
-// Capture and curtailment
-// ---------------------------------------------------------------------------------------------
-
-/**
- * The combined effect of the capture price and negative prices on a plant that stops producing
- * whenever the day-ahead price is below zero (a merchant plant with no subsidy for negative
- * hours), per calendar year and technology, from one zone's hourly rows {date, price, solar,
- * wind} (residual/[zone].csv). With B the year's baseload (mean of every hourly price), g the
- * hourly output and p the price:
- *
- *   cfPos  = Σ_{p≥0} p·g / Σ_{p≥0} g / B   capture factor of the output still sold
- *   lost   = Σ_{p<0} g / Σ g               share of output curtailed in negative hours
- *   evf    = Σ_{p≥0} p·g / Σ g / B         effective value factor = cfPos × (1 − lost)
- *
- * so evf − 1 = (cfPos − 1) [price capture] + (−cfPos × lost) [output lost to curtailment]. `cf`
- * is the ordinary capture factor (selling through negative hours, Σ p·g / Σ g / B), for
- * reference. A year needs all twelve months, except `openYear`, which needs three; rows with too
- * little output (under 1 MWh) or a baseload within 1 EUR/MWh of zero are left out, as in
- * monthlyCapture. Returns [{year, tech, months, base, cf, cfPos, lost, evf, priceEffect,
- * curtailEffect, negHours}].
- */
-export function curtailmentEffect(rows, {openYear = null} = {}) {
-  const acc = new Map(); // year → {months, prices, hours, negHours, tech: {key: {e, eNeg, r, rPos}}}
-  for (const d of rows) {
-    const year = d.date.slice(0, 4);
-    let a = acc.get(year);
-    if (!a) acc.set(year, (a = {months: new Set(), sum: 0, hours: 0, negHours: 0, tech: Object.fromEntries(CAPTURE_TECHS.map((t) => [t.key, {e: 0, eNeg: 0, r: 0, rPos: 0}]))}));
-    a.months.add(d.date.slice(5, 7));
-    a.sum += d.price; a.hours += 1;
-    if (d.price < 0) a.negHours += 1;
-    for (const {key} of CAPTURE_TECHS) {
-      const g = d[key];
-      if (!(g > 0)) continue;
-      const t = a.tech[key];
-      t.e += g; t.r += d.price * g;
-      if (d.price < 0) t.eNeg += g;
-      else t.rPos += d.price * g;
-    }
-  }
-  const out = [];
-  for (const [year, a] of acc) {
-    if (a.months.size < (year === openYear ? 3 : 12)) continue;
-    const base = a.sum / a.hours;
-    if (Math.abs(base) < MIN_BASE) continue;
-    for (const {key} of CAPTURE_TECHS) {
-      const {e, eNeg, r, rPos} = a.tech[key];
-      if (e < MIN_MWH || e - eNeg < MIN_MWH) continue;
-      const cfPos = rPos / (e - eNeg) / base;
-      const lost = eNeg / e;
-      const evf = rPos / e / base;
-      out.push({
-        year, tech: key, months: a.months.size, base, cf: r / e / base, cfPos, lost, evf,
-        priceEffect: cfPos - 1, curtailEffect: evf - cfPos, negHours: a.negHours
-      });
-    }
-  }
-  return out.sort((x, y) => (x.year < y.year ? -1 : x.year > y.year ? 1 : x.tech < y.tech ? -1 : 1));
-}
-
