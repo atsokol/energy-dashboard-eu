@@ -95,39 +95,9 @@ export function capacityByYear(rows) {
 }
 
 /**
- * Average output per group by season and local hour of day, from an hourly `generation_per_type`
- * CSV for one zone. Each production type is averaged on its own and then summed into its group,
- * so a type with a few missing hours does not drag its group's average down.
- */
-export function seasonalProfiles(rows, zone, year) {
-  const acc = new Map();
-  for (const r of rows) {
-    if (!groupOfPsr.has(r.psr_type)) continue;
-    const mw = value(r.actual_mw);
-    if (!Number.isFinite(mw)) continue;
-    const {date, hour} = localTime(Date.parse(r.ts_utc.slice(0, 19).replace(" ", "T") + "Z"), zone);
-    if (date.slice(0, 4) !== year) continue;
-    const key = `${seasonOfMonth.get(+date.slice(5, 7))}|${hour}|${r.psr_type}`;
-    let a = acc.get(key);
-    if (!a) acc.set(key, (a = {sum: 0, n: 0}));
-    a.sum += mw; a.n += 1;
-  }
-  const groups = new Map();
-  for (const [key, {sum, n}] of acc) {
-    const [season, hour, psr] = key.split("|");
-    const id = `${season}|${hour}|${groupOfPsr.get(psr)}`;
-    groups.set(id, (groups.get(id) ?? 0) + sum / n);
-  }
-  return [...groups].map(([id, mw]) => {
-    const [season, hour, group] = id.split("|");
-    return {season, hour: +hour, group, mw};
-  });
-}
-
-/**
  * Average output per group, and average load, by calendar month and local hour of day for one
  * zone: [{month: "YYYY-MM", hour, group, mw}], load as group "load". `genRows` and `loadRows` are
- * hourly `generation_per_type` and `actual_load` CSV rows. As in seasonalProfiles, each production
+ * hourly `generation_per_type` and `actual_load` CSV rows. Each production
  * type is averaged on its own before it is summed into its group.
  */
 export function monthHourProfiles(genRows, loadRows, zone) {
@@ -171,6 +141,50 @@ export function monthHourProfiles(genRows, loadRows, zone) {
 // Page roll-ups
 // ---------------------------------------------------------------------------------------------
 
+const daysInMonth = (month) => new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7), 0)).getUTCDate();
+
+/**
+ * Typical day by season for one calendar year, from one zone's monthHourProfiles rows
+ * ({month: "YYYY-MM", hour, group, mw}): [{season, hour, group, mw}]. Each season averages its
+ * months of that year (winter = January, February and December), weighted by days; a group with
+ * no row in a month counts as zero there. Load rows are left out; a season with no months yet
+ * (the year in progress) has no rows.
+ */
+export function seasonalFromMonthHour(rows, year) {
+  const byMonth = new Map(); // month → Map(hour|group → mw)
+  for (const d of rows) {
+    if (d.group === "load" || d.month.slice(0, 4) !== year) continue;
+    if (!byMonth.has(d.month)) byMonth.set(d.month, new Map());
+    byMonth.get(d.month).set(`${d.hour}|${d.group}`, d.mw);
+  }
+  const acc = new Map(); // season|hour|group → Σ days × mw
+  const weight = new Map(); // season → Σ days
+  for (const [month, values] of byMonth) {
+    const season = seasonOfMonth.get(+month.slice(5, 7));
+    const days = daysInMonth(month);
+    weight.set(season, (weight.get(season) ?? 0) + days);
+    for (const [key, mw] of values) acc.set(`${season}|${key}`, (acc.get(`${season}|${key}`) ?? 0) + days * mw);
+  }
+  return [...acc].map(([key, sum]) => {
+    const [season, hour, group] = key.split("|");
+    return {season, hour: +hour, group, mw: sum / weight.get(season)};
+  });
+}
+
+/**
+ * The years a monthly series covers, newest first, each {year, months, open}: `months` is how
+ * many months of it the data holds, `open` marks the year in progress (fewer than twelve).
+ */
+export function dataYears(monthly) {
+  const months = new Map();
+  for (const d of monthly) {
+    const y = d.month.slice(0, 4);
+    if (!months.has(y)) months.set(y, new Set());
+    months.get(y).add(d.month);
+  }
+  return [...months].map(([year, set]) => ({year, months: set.size, open: set.size < 12})).sort((a, b) => (a.year < b.year ? 1 : -1));
+}
+
 /** The latest calendar year whose December is in the monthly data: the last full year. */
 export function lastFullYear(monthly) {
   const decembers = monthly.filter((d) => d.month.slice(5, 7) === "12").map((d) => d.month.slice(0, 4));
@@ -178,10 +192,11 @@ export function lastFullYear(monthly) {
 }
 
 /**
- * Per zone, the year's generation by group (GWh) and in total, for zones that reported all twelve
- * months: [{zone, total, mix: Map(group → gwh)}].
+ * Per zone, the year's generation by group (GWh) and in total, for zones that reported all
+ * `months` months of it (twelve; fewer for the year in progress): [{zone, total, mix: Map(group →
+ * gwh)}].
  */
-export function annualMix(monthly, year) {
+export function annualMix(monthly, year, months = 12) {
   const byZone = new Map();
   for (const d of monthly) {
     if (d.month.slice(0, 4) !== year) continue;
@@ -191,7 +206,7 @@ export function annualMix(monthly, year) {
     z.mix.set(d.group, (z.mix.get(d.group) ?? 0) + d.gwh);
   }
   return [...byZone]
-    .filter(([, z]) => z.months.size === 12)
+    .filter(([, z]) => z.months.size >= months)
     .map(([zone, {mix}]) => ({zone, total: [...mix.values()].reduce((s, x) => s + x, 0), mix}));
 }
 

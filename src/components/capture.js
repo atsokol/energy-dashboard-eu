@@ -191,3 +191,64 @@ export function pivotDomain(values, lo = 0.02, hi = 0.98) {
   const reach = Math.max(1 - quantileSorted(sorted, lo), quantileSorted(sorted, hi) - 1, 0.05);
   return [1 - reach, 1 + reach];
 }
+
+// ---------------------------------------------------------------------------------------------
+// Capture and curtailment
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The combined effect of the capture price and negative prices on a plant that stops producing
+ * whenever the day-ahead price is below zero (a merchant plant with no subsidy for negative
+ * hours), per calendar year and technology, from one zone's hourly rows {date, price, solar,
+ * wind} (residual/[zone].csv). With B the year's baseload (mean of every hourly price), g the
+ * hourly output and p the price:
+ *
+ *   cfPos  = Σ_{p≥0} p·g / Σ_{p≥0} g / B   capture factor of the output still sold
+ *   lost   = Σ_{p<0} g / Σ g               share of output curtailed in negative hours
+ *   evf    = Σ_{p≥0} p·g / Σ g / B         effective value factor = cfPos × (1 − lost)
+ *
+ * so evf − 1 = (cfPos − 1) [price capture] + (−cfPos × lost) [output lost to curtailment]. `cf`
+ * is the ordinary capture factor (selling through negative hours, Σ p·g / Σ g / B), for
+ * reference. A year needs all twelve months, except `openYear`, which needs three; rows with too
+ * little output (under 1 MWh) or a baseload within 1 EUR/MWh of zero are left out, as in
+ * monthlyCapture. Returns [{year, tech, months, base, cf, cfPos, lost, evf, priceEffect,
+ * curtailEffect, negHours}].
+ */
+export function curtailmentEffect(rows, {openYear = null} = {}) {
+  const acc = new Map(); // year → {months, prices, hours, negHours, tech: {key: {e, eNeg, r, rPos}}}
+  for (const d of rows) {
+    const year = d.date.slice(0, 4);
+    let a = acc.get(year);
+    if (!a) acc.set(year, (a = {months: new Set(), sum: 0, hours: 0, negHours: 0, tech: Object.fromEntries(CAPTURE_TECHS.map((t) => [t.key, {e: 0, eNeg: 0, r: 0, rPos: 0}]))}));
+    a.months.add(d.date.slice(5, 7));
+    a.sum += d.price; a.hours += 1;
+    if (d.price < 0) a.negHours += 1;
+    for (const {key} of CAPTURE_TECHS) {
+      const g = d[key];
+      if (!(g > 0)) continue;
+      const t = a.tech[key];
+      t.e += g; t.r += d.price * g;
+      if (d.price < 0) t.eNeg += g;
+      else t.rPos += d.price * g;
+    }
+  }
+  const out = [];
+  for (const [year, a] of acc) {
+    if (a.months.size < (year === openYear ? 3 : 12)) continue;
+    const base = a.sum / a.hours;
+    if (Math.abs(base) < MIN_BASE) continue;
+    for (const {key} of CAPTURE_TECHS) {
+      const {e, eNeg, r, rPos} = a.tech[key];
+      if (e < MIN_MWH || e - eNeg < MIN_MWH) continue;
+      const cfPos = rPos / (e - eNeg) / base;
+      const lost = eNeg / e;
+      const evf = rPos / e / base;
+      out.push({
+        year, tech: key, months: a.months.size, base, cf: r / e / base, cfPos, lost, evf,
+        priceEffect: cfPos - 1, curtailEffect: evf - cfPos, negHours: a.negHours
+      });
+    }
+  }
+  return out.sort((x, y) => (x.year < y.year ? -1 : x.year > y.year ? 1 : x.tech < y.tech ? -1 : 1));
+}
+

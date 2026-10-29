@@ -11,20 +11,25 @@ fallback, shared client modules in `src/components/`, a jsdom smoke test gating 
 
 ## Pages
 
-- **Generation mix** (`/generation`): donut map of each zone's mix in the last full year (area ∝
-  total generation), monthly generation by type beside the latest installed-capacity snapshot, and average
-  hourly generation by season (winter/spring/summer/autumn) for a selected country.
+- **Generation mix** (`/generation`): for a chosen year (the current one to date), a donut map of
+  each zone's mix (area ∝ total generation), the installed-capacity snapshot of that year (or the
+  latest before it) beside monthly generation by type since 2021, and average hourly generation by
+  season (winter/spring/summer/autumn) for a selected country.
 - **Day-ahead prices** (`/prices`): price map (any year / month / week / day since 2021, the
   current one to date), monthly average price (from a chosen start year), average hourly residual
-  load and price for a chosen month by year, the same month by month through one year with the
-  generation mix by hour of that year and month, a price vs residual-load scatter, and cumulative
-  negative-price hours for a selected country.
+  load and price either **by year** (one line per year for a chosen month) or **by month** (one
+  year built up month by month, coloured by season), with a month slider whose Play runs once,
+  the generation mix by hour of that year and month, a price vs residual-load scatter, cumulative
+  negative-price hours and value by year for a selected country, and the same through a chosen
+  year against every other country.
 - **Day-ahead spreads** (`/spreads`): TB1/2/4 map (any year / month / week, the current one to
   date), the top/bottom spread band for the selected country, and a 30-day moving-average
   comparison across countries.
 - **Capture factors** (`/capture`): solar and wind capture factor maps (any year or month, a
   diverging scale centred on 100%), annual and seasonal capture factors for chosen countries, and
-  monthly capture factor against the technology's share of generation.
+  monthly capture factor against the technology's share of generation (y scales cut at 200%), and
+  **capture and curtailment**: per year, a plant's effective value if it stops in negative-price
+  hours, split into the capture factor of the output it still sells and the output it gives up.
 
 Map colour scales are fixed per period type (P2-P98 of all zone-period values, clamped), so
 colours compare across periods.
@@ -58,16 +63,17 @@ step even when a later step fails, so downloads are never repeated (`.github/wor
 TB2, TB4, negative hours). Pages load ~1 MB of gzipped static files and are ready in well under a
 second.
 
-Generation uses three more loaders: `gen-monthly.csv` (zone × month × group, GWh, from one
-monthly-aggregated `generation_per_type` call per zone), `gen-capacity.csv` (zone × year × group,
-MW, from `installed_generation_capacity`) and `gen-profiles.csv` (zone × season × local hour ×
-group, mean MW, for the last full year). The profiles need a year of hourly data per zone (~130
-MB across all zones, ~60 s), so only zones missing that year are downloaded.
+Generation uses two more loaders: `gen-monthly.csv` (zone × month × group, GWh, from one
+monthly-aggregated `generation_per_type` call per zone) and `gen-capacity.csv` (zone × year ×
+group, MW, from `installed_generation_capacity`). The seasonal profiles of any year are averaged
+in the page from the hourly-mix files below (`seasonalFromMonthHour`), so no separate download is
+needed.
 
 Residual load comes from the parameterized loader `src/data/residual/[zone].csv.js`, which
-writes one file per zone (`date,hour,price,rl`: every local hour since 2021 with its price and
-load − wind − solar in MW, ~1.3 MB, ~0.4 MB gzipped), so the prices page loads only the selected
-country. It joins hourly prices (shared raw cache), `actual_load` and hourly `generation_per_type`
+writes one file per zone (`date,hour,price,rl,solar,wind`: every local hour since 2021 with its
+price, load − wind − solar, and solar and wind output in MW, ~1.9 MB, ~0.6 MB gzipped), so the
+prices and capture pages load only the selected country. A snapshot from before a column was added
+is downloaded again in full once. It joins hourly prices (shared raw cache), `actual_load` and hourly `generation_per_type`
 on the UTC hour. Hourly generation is ~5 MB per zone-year (~500 MB for all zones since 2021), so
 the loader keeps its cached snapshot (`cache/residual/`) up to the start of the month before its
 latest month and downloads only from there (~2 s per zone a day). `RESIDUAL_FULL=1` (or
@@ -137,6 +143,11 @@ node test/serve-dist.mjs   # serve the built dist/ like GitHub Pages (gzip) on :
   other renewable); solar; other (oil, batteries, other). Monthly GWh = monthly mean MW × days ×
   24, local months, the month in progress dropped. AL has generation data only from 2026, so it is
   absent from the 2025 map and profiles.
+- **Capture and curtailment**: for a plant that stops whenever the day-ahead price is below zero,
+  with B the year's baseload, p the hourly price and g the hourly output: capture factor of the
+  output still sold CF₊ = Σ₍p≥0₎ p·g ÷ Σ₍p≥0₎ g ÷ B; output lost L = Σ₍p<0₎ g ÷ Σ g; effective value
+  factor EVF = Σ₍p≥0₎ p·g ÷ Σ g ÷ B = CF₊ × (1 − L), so EVF − 1 = (CF₊ − 1) + (−CF₊ × L). Reported
+  output is used as the potential, so output that was already curtailed upstream is not counted.
 - **Capture factor** = output-weighted day-ahead price ÷ baseload (all-hours) price in the same
   period. Wind is onshore + offshore, each type weighted by its own output. A month that switched
   currency arrives split per currency and is converted to EUR before combining. Seasons are

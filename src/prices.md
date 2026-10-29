@@ -14,7 +14,7 @@ import {START_DATE, ZONES, zonesIn} from "./components/zones.js"
 import {anchorDay, cumulativeByYear, fuelMonthly, listPeriods, monthlyMeans, periodMeans, stableDomain} from "./components/dam.js"
 import {hourlyProfiles} from "./components/residual.js"
 import {brushHours, linkedBrush, linkPeriod, linkValue, periodLinks, regionInput, rememberZone, savedZone} from "./components/linking.js"
-import {cumulativeYearChart, hourlyByYearChart, linkMapToInput, hourlyMixChart, monthBuildChart, monthlyPriceChart, playGroup, priceResidualScatter, scrubber, zoneMap} from "./components/charts.js"
+import {cumulativeCompareChart, cumulativeYearChart, hourlyByYearChart, linkMapToInput, hourlyMixChart, monthBuildChart, monthlyPriceChart, playGroup, priceResidualScatter, scrubber, zoneMap} from "./components/charts.js"
 ```
 
 ```js
@@ -121,14 +121,12 @@ monthlyPriceChart({d3, Plot, width, rows: monthly.filter((d) => d.month >= `${fr
 
 ## Hourly prices and residual load
 
-Residual load (load − wind − solar) is what dispatchable plants, storage and imports must cover.
-Average by local hour for the selected month, one line per year; where solar cuts midday residual
-load, the price follows. Scales are fixed across months. All month and year controls on this page
-are linked.
-
-```js
-const month = view(linkValue(links.month, "profiles", Inputs.select(new Map(MONTHS), {label: "Month"})))
-```
+Residual load (load − wind − solar) is what dispatchable plants, storage and imports must cover;
+where solar cuts midday residual load, the price follows. **By year**: the chosen month, one line
+per year, on scales fixed across months. **By month**: the chosen year built up month by month,
+coloured by season (blue winter, green spring, red summer, amber autumn), on scales fixed for the
+year. Press Play to step through the months once, or drag the slider. All month and year controls
+on this page are linked.
 
 ```js
 // One file per zone, so the page loads only the selected country; FileAttachment needs literal paths.
@@ -193,12 +191,6 @@ const shownProfiles = profilesAll.filter((d) => d.year >= fromYear)
 ```
 
 ```js
-// Its own cell, so a month change re-runs only what reads the month.
-const monthLabel = monthName(month)
-const profiles = shownProfiles.filter((d) => d.month === month)
-```
-
-```js
 // Side by side when each chart keeps at least ~310 px; stacked otherwise.
 const pairWidth = Math.min(width, 800)
 const sideBySide = pairWidth >= 640
@@ -221,56 +213,62 @@ const scatterRlDomain = d3.extent(residual, (d) => d.rl)
 ```
 
 ```js
-profiles.length ? html`<div style="display: grid; grid-template-columns: ${sideBySide ? `${halfWidth}px ${halfWidth}px` : "1fr"}; gap: ${pairGap}px; max-width: 800px; align-items: start;">
-  ${hourlyByYearChart({
-    d3, Plot, rows: profiles, years: shownYears, value: "rl", k: rlUnit.k, domain: profileRlDomain, width: halfWidth,
-    title: `Residual load by hour — ${monthLabel}`,
-    subtitle: `${ZONES.find((z) => z.key === zone).name}: average load − wind − solar, ${rlUnit.label}`,
-    label: rlUnit.label, format: rlFormat
-  })}
-  ${hourlyByYearChart({
-    d3, Plot, rows: profiles, years: shownYears, value: "price", domain: profilePriceDomain, width: halfWidth,
-    title: `Day-ahead price by hour — ${monthLabel}`,
-    subtitle: `${ZONES.find((z) => z.key === zone).name}: average hourly DAM price, EUR/MWh`,
-    label: "EUR / MWh"
-  })}
-</div>` : html`<p>No residual-load data for this country in ${monthLabel} from ${fromYear}.</p>`
+const HOURLY_VIEWS = [["By year", "year"], ["By month", "month"]]
+const hourlyView = view(Inputs.radio(new Map(HOURLY_VIEWS), {value: "year", label: "Compare"}))
 ```
-
-### Month by month through a year
-
-Both profiles for each month of one year, coloured by season (blue winter, red summer). Press Play
-or drag the slider; scales are fixed for the year.
 
 ```js
 const profileYears = [...new Set(profilesAll.map((d) => d.year))]
+// By month, and the generation mix below, show this year.
 const buildYear = view(linkValue(links.year, "build", Inputs.select(profileYears, {value: profileYears.at(-1), label: "Year"}), {
   accepts: (y) => profileYears.includes(y)
 }))
 ```
 
 ```js
-const yearProfiles = profilesAll.filter((d) => d.year === buildYear)
-const yearMonths = [...new Set(yearProfiles.map((d) => d.month))]
-const buildRlDomain = fixedDomain(yearProfiles, "rl", rlUnit.k)
-const buildPriceDomain = fixedDomain(yearProfiles, "price")
-const upTo = view(linkValue(links.month, "build", scrubber(yearMonths, {format: (m) => monthName(m).slice(0, 3), label: "Month", autoplay: false, group: players}), {
-  accepts: (m) => yearMonths.includes(m)
-}))
+// Play runs once through the months; the scatter's slider below shares Play/Pause.
+const month = view(linkValue(links.month, "profiles", scrubber(MONTHS.map(([, mm]) => mm), {
+  format: (m) => monthName(m).slice(0, 3), label: "Month", autoplay: false, loop: false, group: players
+})))
 ```
 
 ```js
-html`<div style="display: grid; grid-template-columns: ${sideBySide ? `${halfWidth}px ${halfWidth}px` : "1fr"}; gap: ${pairGap}px; max-width: 800px; align-items: start;">
+// Its own cell, so a month change re-runs only what reads the month.
+const monthLabel = monthName(month)
+const profiles = shownProfiles.filter((d) => d.month === month)
+const yearProfiles = profilesAll.filter((d) => d.year === buildYear)
+const buildRlDomain = fixedDomain(yearProfiles, "rl", rlUnit.k)
+const buildPriceDomain = fixedDomain(yearProfiles, "price")
+const zoneName = ZONES.find((z) => z.key === zone).name
+```
+
+```js
+hourlyView === "year"
+  ? (profiles.length ? html`<div style="display: grid; grid-template-columns: ${sideBySide ? `${halfWidth}px ${halfWidth}px` : "1fr"}; gap: ${pairGap}px; max-width: 800px; align-items: start;">
+  ${hourlyByYearChart({
+    d3, Plot, rows: profiles, years: shownYears, value: "rl", k: rlUnit.k, domain: profileRlDomain, width: halfWidth,
+    title: `Residual load by hour — ${monthLabel}`,
+    subtitle: `${zoneName}: average load − wind − solar, ${rlUnit.label}`,
+    label: rlUnit.label, format: rlFormat
+  })}
+  ${hourlyByYearChart({
+    d3, Plot, rows: profiles, years: shownYears, value: "price", domain: profilePriceDomain, width: halfWidth,
+    title: `Day-ahead price by hour — ${monthLabel}`,
+    subtitle: `${zoneName}: average hourly DAM price, EUR/MWh`,
+    label: "EUR / MWh"
+  })}
+</div>` : html`<p>No residual-load data for this country in ${monthLabel} from ${fromYear}.</p>`)
+  : html`<div style="display: grid; grid-template-columns: ${sideBySide ? `${halfWidth}px ${halfWidth}px` : "1fr"}; gap: ${pairGap}px; max-width: 800px; align-items: start;">
   ${monthBuildChart({
-    d3, Plot, rows: yearProfiles, upTo, value: "rl", k: rlUnit.k, domain: buildRlDomain, width: halfWidth,
+    d3, Plot, rows: yearProfiles, upTo: month, value: "rl", k: rlUnit.k, domain: buildRlDomain, width: halfWidth,
     title: `Residual load by hour — ${buildYear}`,
-    subtitle: `${ZONES.find((z) => z.key === zone).name}: monthly average, ${rlUnit.label}`,
+    subtitle: `${zoneName}: monthly average, ${rlUnit.label}`,
     label: rlUnit.label, format: rlFormat
   })}
   ${monthBuildChart({
-    d3, Plot, rows: yearProfiles, upTo, value: "price", domain: buildPriceDomain, width: halfWidth,
+    d3, Plot, rows: yearProfiles, upTo: month, value: "price", domain: buildPriceDomain, width: halfWidth,
     title: `Day-ahead price by hour — ${buildYear}`,
-    subtitle: `${ZONES.find((z) => z.key === zone).name}: monthly average, EUR/MWh`,
+    subtitle: `${zoneName}: monthly average, EUR/MWh`,
     label: "EUR / MWh"
   })}
 </div>`
@@ -341,8 +339,8 @@ const genHourly = genHourlyRaw.map((d) => ({month: d.month, hour: +d.hour, group
 ```
 
 ```js
-const mixLabel = `${monthName(upTo)} ${buildYear}`
-const mixRows = genHourly.filter((d) => d.month === `${buildYear}-${upTo}`)
+const mixLabel = `${monthName(month)} ${buildYear}`
+const mixRows = genHourly.filter((d) => d.month === `${buildYear}-${month}`)
 ```
 
 ```js
@@ -362,7 +360,7 @@ Higher residual load calls on dearer plants, so the cloud rises to the right.
 // "All months" (last step) is its own and moves no other control.
 const SCATTER_STEPS = [...MONTHS.map(([, mm]) => mm), "all"]
 const scatterMonthInput = linkValue(links.month, "scatter", scrubber(SCATTER_STEPS, {
-  autoplay: false, group: players, label: "Month", delay: 1200, endDelay: 3000,
+  autoplay: false, loop: false, group: players, label: "Month", delay: 1200, endDelay: 3000,
   format: (m) => (m === "all" ? "All months" : monthName(m).slice(0, 3))
 }), {toLink: (m) => (m === "all" ? null : m)})
 // The year highlighted from the legend, kept while the slider or Play redraws the chart.
@@ -391,19 +389,55 @@ const negValue = cumulativeByYear(zoneNegative, "neg_value")
 ```
 
 ```js
-cumulativeYearChart({
-  d3, Plot, width, rows: negHours,
-  title: `Cumulative hours with negative day-ahead prices — ${ZONES.find((z) => z.key === zone).name}`,
-  subtitle: "Hours priced below 0 EUR/MWh, running total from 1 January",
-  label: "hours"
-})
+html`<div style="display: grid; grid-template-columns: ${sideBySide ? `${halfWidth}px ${halfWidth}px` : "1fr"}; gap: ${pairGap}px; max-width: 800px; align-items: start;">
+  ${cumulativeYearChart({
+    d3, Plot, width: halfWidth, rows: negHours,
+    title: `Cumulative negative-price hours — ${zoneName}`,
+    subtitle: "Hours priced below 0 EUR/MWh, running total from 1 January",
+    label: "hours"
+  })}
+  ${cumulativeYearChart({
+    d3, Plot, width: halfWidth, rows: negValue,
+    title: `Cumulative value of negative prices — ${zoneName}`,
+    subtitle: "Sum of negative hourly prices, running total from 1 January",
+    label: "EUR / MW"
+  })}
+</div>`
+```
+
+### One year across countries
+
+The same running totals through the chosen year, ${zoneName} against every other country shown
+(grey). Hover for a country.
+
+```js
+const negYear = view(linkValue(links.year, "negative", Inputs.select([...YEARS].reverse(), {value: anchor.slice(0, 4), label: "Year"}), {
+  accepts: (y) => YEARS.includes(y)
+}))
 ```
 
 ```js
-cumulativeYearChart({
-  d3, Plot, width, rows: negValue,
-  title: `Cumulative value of negative day-ahead prices — ${ZONES.find((z) => z.key === zone).name}`,
-  subtitle: "Sum of negative hourly prices, running total from 1 January",
-  label: "EUR / MW"
-})
+// Every zone shown, plus the selected one if its region is unticked.
+const negZones = [...new Set([...shownKeys, zone])]
+const negYearDaily = daily.filter((d) => d.date.slice(0, 4) === negYear && negZones.includes(d.zone))
+const negCompare = (field) => negZones.flatMap((z) => cumulativeByYear(negYearDaily.filter((d) => d.zone === z), field).map((d) => ({zone: z, day: d.day, value: d.value})))
+const negHoursYear = negCompare("neg_hours")
+const negValueYear = negCompare("neg_value")
+```
+
+```js
+html`<div style="display: grid; grid-template-columns: ${sideBySide ? `${halfWidth}px ${halfWidth}px` : "1fr"}; gap: ${pairGap}px; max-width: 800px; align-items: start;">
+  ${cumulativeCompareChart({
+    d3, Plot, width: halfWidth, rows: negHoursYear, zone, year: negYear,
+    title: `Negative-price hours in ${negYear}`,
+    subtitle: `Running total from 1 January; ${zoneName} against other countries`,
+    label: "hours"
+  })}
+  ${cumulativeCompareChart({
+    d3, Plot, width: halfWidth, rows: negValueYear, zone, year: negYear,
+    title: `Value of negative prices in ${negYear}`,
+    subtitle: `Running total from 1 January; ${zoneName} against other countries`,
+    label: "EUR / MW"
+  })}
+</div>`
 ```

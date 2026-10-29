@@ -186,7 +186,7 @@ export function monthlyPriceChart({d3, Plot, rows, zone, width, cost}) {
     x: timeAxis(width, d3),
     y: {nice: true, grid: true, label: "EUR / MWh", zero: true},
     marks: [
-      Plot.lineY(others, {x: "date", y: "value", z: "zone", stroke: "var(--theme-foreground-faint)", strokeWidth: 1, strokeOpacity: 0.6}),
+      Plot.lineY(others, {x: "date", y: "value", z: "zone", stroke: "var(--theme-foreground-faint)", strokeWidth: 1, strokeOpacity: 0.25}),
       Plot.lineY(gas, {x: "date", y: "cost", stroke: "var(--gen-gas)", strokeWidth: 1.5, strokeDasharray: "4,3"}),
       Plot.text(gasEnd, {x: "date", y: "cost", text: "label", fill: "var(--gen-gas)", textAnchor: "start", dx: 6, fontSize: 10, clip: false}),
       Plot.lineY(own, {x: "date", y: "value", stroke: ACCENT, strokeWidth: 2}),
@@ -299,6 +299,35 @@ export function cumulativeYearChart({d3, Plot, rows, width, title, subtitle, lab
       }),
       Plot.ruleX(data, Plot.pointerX(Plot.binX({x: "min"}, {x: "date", interval: d3.utcDay, insetTop: 20}))),
       Plot.tip(data, Plot.pointerX(Plot.binX({title: (v) => v, x: "min"}, {x: "date", interval: d3.utcDay, render})))
+    ]
+  });
+}
+
+/**
+ * One year's running total of a daily metric for every zone shown: the selected zone in the accent
+ * colour and labelled at its end, the others as thin grey steps. `rows`: [{zone, day: "MM-DD",
+ * value}]. Hovering shows the nearest zone's value.
+ */
+export function cumulativeCompareChart({d3, Plot, rows, zone, year, width, title, subtitle, label, format = d3.format(",.0f")}) {
+  const data = rows.map((d) => ({...d, date: new Date(`2000-${d.day}T00:00:00Z`), country: zoneByKey.get(d.zone).name}));
+  const own = data.filter((d) => d.zone === zone);
+  const others = data.filter((d) => d.zone !== zone);
+  const end = own.length ? [own.at(-1)] : [];
+  return Plot.plot({
+    title, subtitle, caption: SOURCE,
+    width: Math.min(width, 800), height: 320, marginLeft: 55, marginRight: 45,
+    x: {line: true, label: null, ticks: d3.utcMonth.every(width < 500 ? 3 : 2), tickFormat: d3.utcFormat("%b")},
+    y: {grid: true, nice: true, label, tickFormat: format},
+    marks: [
+      Plot.ruleY([0]),
+      Plot.lineY(others, {x: "date", y: "value", z: "zone", curve: "step-after", stroke: "var(--theme-foreground-faint)", strokeWidth: 1, strokeOpacity: 0.5}),
+      Plot.lineY(own, {x: "date", y: "value", curve: "step-after", stroke: ACCENT, strokeWidth: 2.5}),
+      Plot.text(end, {x: "date", y: "value", text: () => zoneByKey.get(zone).short, textAnchor: "start", dx: 5, fill: ACCENT, fontSize: 10, fontWeight: "bold", clip: false}),
+      Plot.tip(data, Plot.pointer({
+        x: "date", y: "value",
+        channels: {Country: "country", [label]: "value"},
+        format: {x: (d) => `${d3.utcFormat("%e %b")(d)} ${year}`, y: false, [label]: format, Country: true}
+      }))
     ]
   });
 }
@@ -525,20 +554,24 @@ function linkScatter(d3, chart, {dots, years, selection, brush, fillOpacity, id 
 }
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-// Cyclic two-colour month palette: cold blue in mid-winter (Jan), warm red in mid-summer (Jul),
-// passing through a light neutral grey at the equinox months (Apr, Oct; pure white would vanish
-// on the light theme), blended along a cosine of the month so Dec sits next to Jan and spring
-// mirrors autumn.
-const MONTH_COLD = "#2f5aa8", MONTH_MID = "#c4c4c4", MONTH_WARM = "#d7301f";
-function monthCycle(d3) {
-  const mix = d3.piecewise(d3.interpolateLab, [MONTH_COLD, MONTH_MID, MONTH_WARM]);
-  return (t) => mix((1 - Math.cos((2 * Math.PI * (t * 11)) / 12)) / 2); // t: 0 = Jan, 1 = Dec
-}
+// Four-season month palette, one anchor per season's middle month: winter blue (Jan), spring
+// green (Apr), summer red (Jul), autumn amber (Oct); opposite seasons are complementary pairs
+// (green against red, amber against blue). The months between are picked by hand rather than
+// blended, since a Lab blend turns May-June olive-brown and November grey: blue to teal to green,
+// yellow-green into summer's orange-reds, orange to amber, and an autumn brown back to a light
+// winter blue in December, so the year closes as a loop.
+const MONTH_COLD = "#2f5aa8", MONTH_WARM = "#d7301f"; // also the spread band's bottom and top legs
+const MONTH_COLORS = [
+  MONTH_COLD, "#2b7bba", "#2a9d8f", // Jan Feb Mar
+  "#2e9a4e", "#7cb342", "#ef6c3a", // Apr May Jun
+  MONTH_WARM, "#b8321a", "#ea7a12", // Jul Aug Sep
+  "#e39b00", "#b9894a", "#5b7fbf" // Oct Nov Dec
+];
 
 /**
  * One year's months built up one at a time: the average of `value` by local hour of day for each
- * month up to `upTo` ("01"-"12"), coloured on a cyclic seasonal palette (monthCycle: cold in
- * winter, warm in summer), the newest month drawn heavier and labelled. `rows`: hourlyProfiles rows of one year.
+ * month up to `upTo` ("01"-"12"), coloured on a cyclic seasonal palette (MONTH_COLORS: blue
+ * winter, green spring, red summer, amber autumn), the newest month drawn heavier and labelled. `rows`: hourlyProfiles rows of one year.
  * `domain` (display units) fixes the y scale so the frames compare.
  */
 export function monthBuildChart({d3, Plot, rows, upTo, value, k = 1, domain, title, subtitle, label, format = fmt1, width}) {
@@ -551,10 +584,7 @@ export function monthBuildChart({d3, Plot, rows, upTo, value, k = 1, domain, tit
     width, height: 300, marginTop: 20, marginBottom: 35, marginLeft: 45, marginRight: 40,
     x: {label: "hour of day", domain: [0, 23], ticks: [0, 6, 12, 18, 23], line: true},
     y: {grid: true, nice: true, label, domain},
-    color: {
-      type: "linear", domain: [1, 12], interpolate: monthCycle(d3),
-      legend: true, ticks: [1, 4, 7, 10, 12], tickFormat: (m) => MONTH_ABBR[m - 1], label: null
-    },
+    color: {type: "ordinal", domain: d3.range(1, 13), range: MONTH_COLORS, legend: true, tickFormat: (m) => MONTH_ABBR[m - 1]},
     marks: [
       Plot.ruleY([0]),
       Plot.lineY(data, {
@@ -576,11 +606,11 @@ export function monthBuildChart({d3, Plot, rows, upTo, value, k = 1, domain, tit
  * step, an "input" event fires on each change). Starts on `value` (default the last step);
  * setting `value` from outside moves the slider without firing "input", so another control can
  * drive it (see linkValue in linking.js). Autoplays once on the page unless `autoplay` is false, pauses on the last step for
- * `endDelay` ms and loops. Stops ticking when removed from the page (e.g. when its cell re-runs).
+ * `endDelay` ms and loops; with `loop: false`, Play runs once through to the last step and stops. Stops ticking when removed from the page (e.g. when its cell re-runs).
  * Scrubbers given the same `group` (from playGroup) share Play/Pause: one plays at a time, every
  * button shows it, and Pause or a drag on any of them stops it.
  */
-export function scrubber(values, {format = (v) => v, delay = 900, endDelay = 2500, autoplay = true, label = "", value, group = null} = {}) {
+export function scrubber(values, {format = (v) => v, delay = 900, endDelay = 2500, autoplay = true, loop = true, label = "", value, group = null} = {}) {
   const form = document.createElement("form");
   form.style.cssText = "display: flex; align-items: center; gap: 0.6em; font: 13px var(--sans-serif); margin: 0.5em 0;";
   form.innerHTML = `<span style="min-width: 120px">${label}</span><button type="button" style="width: 5em"></button>
@@ -620,6 +650,7 @@ export function scrubber(values, {format = (v) => v, delay = 900, endDelay = 250
   const tick = () => {
     if (!form.isConnected) return stop();
     set(i < values.length - 1 ? i + 1 : 0);
+    if (!loop && i === values.length - 1) return stop();
     timer = setTimeout(tick, i === values.length - 1 ? endDelay : delay);
   };
   const play = () => {
@@ -962,7 +993,7 @@ export function seasonalProfileChart({d3, Plot, rows, zone, year, width}) {
   const w = Math.min(width, 800);
   return Plot.plot({
     title: `Typical day by season — ${zoneByKey.get(zone).name}, ${year}`,
-    subtitle: `Average generation by type and local hour, ${unit.label}; winter = Jan, Feb, Dec ${year}`,
+    subtitle: `Average generation by type and local hour, ${unit.label}; winter = January, February and December of the year`,
     caption: SOURCE,
     width: w, height: 60 + 2 * (w < 500 ? 170 : 210), marginLeft: 45, marginRight: 15,
     x: {label: "hour of day", domain: [0, 23], ticks: [0, 6, 12, 18, 23], line: true},
@@ -1053,7 +1084,8 @@ export function captureLines({d3, Plot, rows, keys, tech, resolution, width, dom
   const marginTop = 20, marginBottom = 30;
   const [lo, hi] = domain ?? d3.extent(data, (d) => d.value);
   const present = keys.filter((k) => data.some((d) => d.zone === k));
-  const last = separateLabels(present.map((k) => data.filter((d) => d.zone === k).at(-1)).map((d) => ({...d, ma: d.value})), {
+  // End labels stay inside a capped scale (the page cuts capture factors at 200%).
+  const last = separateLabels(present.map((k) => data.filter((d) => d.zone === k).at(-1)).map((d) => ({...d, ma: Math.min(d.value, hi)})), {
     yMax: hi - lo, plotHeight: height - marginTop - marginBottom
   });
   const header = annual
@@ -1073,12 +1105,12 @@ export function captureLines({d3, Plot, rows, keys, tech, resolution, width, dom
     color: {legend: true, ...seriesColors(keys)},
     marks: [
       Plot.ruleY([1], {stroke: "var(--theme-foreground-muted)", strokeDasharray: "2,2"}),
-      Plot.lineY(closed, {x: "x", y: "value", stroke: "name", z: "zone", strokeWidth: 1.5}),
-      Plot.lineY(dashed, {x: "x", y: "value", stroke: "name", z: "zone", strokeWidth: 1.5, strokeDasharray: "3,3"}),
+      Plot.lineY(closed, {x: "x", y: "value", stroke: "name", z: "zone", strokeWidth: 1.5, clip: true}),
+      Plot.lineY(dashed, {x: "x", y: "value", stroke: "name", z: "zone", strokeWidth: 1.5, strokeDasharray: "3,3", clip: true}),
       ...(annual
         ? [
-            Plot.dot(closed, {x: "x", y: "value", fill: "name", r: 2.5}),
-            Plot.dot(data.filter((d) => d.open), {x: "x", y: "value", stroke: "name", fill: "var(--theme-background)", r: 3})
+            Plot.dot(closed, {x: "x", y: "value", fill: "name", r: 2.5, clip: true}),
+            Plot.dot(data.filter((d) => d.open), {x: "x", y: "value", stroke: "name", fill: "var(--theme-background)", r: 3, clip: true})
           ]
         : []),
       Plot.text(last, {
@@ -1139,3 +1171,50 @@ export function captureShareScatter({d3, Plot, rows, tech, zone, years, width, x
   linkScatter(d3, chart, {dots, years, selection, brush: null, fillOpacity: 1, id: `share-${tech}`});
   return chart;
 }
+
+/**
+ * Capture and curtailment for one zone and technology, one column per year (curtailmentEffect
+ * rows): from the baseload price (100%), the price-capture effect on the output still sold (blue)
+ * and the output lost to curtailment in negative hours (orange) step down, or up, to the effective
+ * value factor (black tick, labelled). The hollow dot is the ordinary capture factor, selling
+ * through negative hours. `domain` fixes the y scale so solar and wind compare; it is cut at 200%.
+ */
+export function curtailmentChart({d3, Plot, rows, tech, zone, openYear, lastMonthShort, width, domain}) {
+  const label = captureTechByKey.get(tech).label;
+  const CAPTURE = "Price capture, output sold", LOST = "Output lost to curtailment";
+  const yearText = (d) => (d.year === openYear ? `${d.year} (to ${lastMonthShort})` : d.year);
+  const data = rows.map((d) => ({...d, x: yearText(d)}));
+  const steps = data.flatMap((d) => [
+    {x: d.x, part: CAPTURE, y1: 1, y2: d.cfPos, d},
+    {x: d.x, part: LOST, y1: d.cfPos, y2: d.evf, d}
+  ]);
+  const [lo, hi] = domain ?? [Math.min(0.5, d3.min(data, (d) => Math.min(d.evf, d.cf))) - 0.05, Math.max(1.1, d3.max(data, (d) => d.cfPos)) + 0.05];
+  const channels = {
+    "Capture factor, output sold": (s) => pct0(s.d.cfPos),
+    "Output lost (negative hours)": (s) => pct0(s.d.lost),
+    "Effective value factor": (s) => pct0(s.d.evf),
+    "Capture factor, no curtailment": (s) => pct0(s.d.cf),
+    "Negative-price hours": (s) => d3.format(",")(s.d.negHours)
+  };
+  return Plot.plot({
+    title: `${label}: capture and curtailment — ${zoneByKey.get(zone).name}`,
+    subtitle: "% of baseload price; black tick: effective value per MWh of potential output if the plant stops in negative hours; hollow dot: capture factor selling through them",
+    caption: SOURCE,
+    width: Math.min(width, 800), height: 320, marginLeft: 45, marginRight: 15, marginTop: 20,
+    x: {label: null, type: "band", padding: 0.35, domain: data.map((d) => d.x)},
+    y: {grid: true, label: "% of baseload", tickFormat: ".0%", domain: [Math.max(lo, 0), Math.min(hi, 2)]},
+    color: {legend: true, domain: [CAPTURE, LOST], range: [ACCENT, "#eb6834"]},
+    marks: [
+      Plot.ruleY([1], {stroke: "var(--theme-foreground-muted)", strokeDasharray: "2,2"}),
+      Plot.barY(steps, {x: "x", y1: "y1", y2: "y2", fill: "part", fillOpacity: 0.85, clip: true, channels, tip: {format: {x: true, y1: false, y2: false, fill: true}}}),
+      Plot.tickY(data, {x: "x", y: "evf", stroke: "var(--theme-foreground)", strokeWidth: 2.5, clip: true}),
+      Plot.dot(data, {x: "x", y: "cf", r: 3.5, stroke: "var(--theme-foreground)", fill: "var(--theme-background)", strokeWidth: 1.25, clip: true}),
+      // Under each column (below its lowest mark), clear of the tick and dot.
+      Plot.text(data, {
+        x: "x", y: (d) => Math.max(Math.min(1, d.cfPos, d.evf, d.cf), lo), text: (d) => pct0(d.evf), dy: 11,
+        fill: "var(--theme-foreground)", stroke: "var(--theme-background)", strokeWidth: 3, paintOrder: "stroke", fontSize: 10, fontWeight: "bold", clip: true
+      })
+    ]
+  });
+}
+
