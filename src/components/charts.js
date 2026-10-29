@@ -1056,6 +1056,8 @@ export function hourlyMixChart({d3, Plot, rows, zone, label, width}) {
 // ---------------------------------------------------------------------------------------------
 
 const pct0 = (x) => `${Math.round(x * 100)}%`;
+// Percentage points of baseload, signed: a decomposition term.
+const pp = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(1)} pt`;
 const monthShort = (month) => new Date(month + "T00:00:00Z").toLocaleDateString("en-GB", {timeZone: "UTC", month: "short", year: "numeric"});
 
 /**
@@ -1172,48 +1174,48 @@ export function captureShareScatter({d3, Plot, rows, tech, zone, years, width, x
 }
 
 /**
- * Capture and curtailment for one zone and technology, one column per year (curtailmentEffect
- * rows): from the baseload price (100%), the price-capture effect on the output still sold (blue)
- * and the output lost to curtailment in negative hours (orange) step down, or up, to the effective
- * value factor (black tick, labelled). The hollow dot is the ordinary capture factor, selling
- * through negative hours. `domain` fixes the y scale so solar and wind compare; it is cut at 200%.
+ * The capture factor decomposed, for one zone and technology, one column per year (annualFactors
+ * rows that carry the terms; see captureFactor). The three terms — price profile, output in
+ * negative hours, negative prices paid — are stacked as deviations from the baseload price
+ * (100%): positive ones above the line, negative ones below, so none overlaps another. Their sum
+ * is the capture factor (dot, labelled), the same value as the annual lines and the maps.
+ * `domain` (capture factors) fixes the y scale so solar and wind compare; it is cut at 200% like
+ * the other capture charts.
  */
-export function curtailmentChart({d3, Plot, rows, tech, zone, openYear, lastMonthShort, width, domain}) {
+export function captureDecompositionChart({d3, Plot, rows, tech, zone, openYear, lastMonthShort, width, domain}) {
   const label = captureTechByKey.get(tech).label;
-  const CAPTURE = "Price capture, output sold", LOST = "Output lost to curtailment";
-  const yearText = (d) => (d.year === openYear ? `${d.year} (to ${lastMonthShort})` : d.year);
+  const PARTS = [["Price profile", "profile"], ["Output in negative hours", "negOutput"], ["Negative prices paid", "negPaid"]];
+  const yearText = (d) => (d.period === openYear ? `${d.period} (to ${lastMonthShort})` : d.period);
   const data = rows.map((d) => ({...d, x: yearText(d)}));
-  const steps = data.flatMap((d) => [
-    {x: d.x, part: CAPTURE, y1: 1, y2: d.cfPos, d},
-    {x: d.x, part: LOST, y1: d.cfPos, y2: d.evf, d}
-  ]);
-  const [lo, hi] = domain ?? [Math.min(0.5, d3.min(data, (d) => Math.min(d.evf, d.cf))) - 0.05, Math.max(1.1, d3.max(data, (d) => d.cfPos)) + 0.05];
+  // Plot stacks positive and negative values apart, on either side of zero (= baseload here).
+  const terms = data.flatMap((d) => PARTS.map(([part, key]) => ({x: d.x, part, dev: d[key], d})));
+  const [lo, hi] = domain ?? [Math.min(0.5, d3.min(data, (d) => d.value) ?? 0.5) - 0.05, Math.max(1.1, d3.max(data, (d) => 1 + Math.max(0, d.profile)) ?? 1) + 0.05];
   const channels = {
-    "Capture factor, output sold": (s) => pct0(s.d.cfPos),
-    "Output lost (negative hours)": (s) => pct0(s.d.lost),
-    "Effective value factor": (s) => pct0(s.d.evf),
-    "Capture factor, no curtailment": (s) => pct0(s.d.cf),
-    "Negative-price hours": (s) => d3.format(",")(s.d.negHours)
+    "Capture factor": (t) => pct0(t.d.value),
+    "Price profile": (t) => pp(t.d.profile),
+    "Output in negative hours": (t) => `${pp(t.d.negOutput)} (${pct0(t.d.lost)} of output)`,
+    "Negative prices paid": (t) => pp(t.d.negPaid),
+    "If curtailed in negative hours": (t) => pct0(t.d.curtailed)
   };
   return Plot.plot({
-    title: `${label}: capture and curtailment — ${zoneByKey.get(zone).name}`,
-    subtitle: "% of baseload price; black tick: effective value per MWh of potential output if the plant stops in negative hours; hollow dot: capture factor selling through them",
+    title: `${label} capture factor, decomposed — ${zoneByKey.get(zone).name}`,
+    subtitle: "Points above or below the baseload price (100%); the parts add up to the capture factor (dot)",
     caption: SOURCE,
     width: Math.min(width, 800), height: 320, marginLeft: 45, marginRight: 15, marginTop: 20,
     x: {label: null, type: "band", padding: 0.35, domain: data.map((d) => d.x)},
-    y: {grid: true, label: "% of baseload", tickFormat: ".0%", domain: [Math.max(lo, 0), Math.min(hi, 2)]},
-    color: {legend: true, domain: [CAPTURE, LOST], range: [ACCENT, "#eb6834"]},
+    y: {grid: true, label: "% of baseload", tickFormat: (v) => pct0(1 + v), domain: [Math.max(lo, 0) - 1, Math.min(hi, 2) - 1]},
+    // The validated palette's first three hues (blue, orange, green): distinct in every pairing,
+    // including the two negative parts stacked next to each other.
+    color: {legend: true, domain: PARTS.map(([part]) => part), range: CATEGORICAL.slice(0, 3)},
     marks: [
-      Plot.ruleY([1], {stroke: "var(--theme-foreground-muted)", strokeDasharray: "2,2"}),
-      Plot.barY(steps, {x: "x", y1: "y1", y2: "y2", fill: "part", fillOpacity: 0.85, clip: true, channels, tip: {format: {x: true, y1: false, y2: false, fill: true}}}),
-      Plot.tickY(data, {x: "x", y: "evf", stroke: "var(--theme-foreground)", strokeWidth: 2.5, clip: true}),
-      Plot.dot(data, {x: "x", y: "cf", r: 3.5, stroke: "var(--theme-foreground)", fill: "var(--theme-background)", strokeWidth: 1.25, clip: true}),
-      // Under each column (below its lowest mark), clear of the tick and dot.
+      Plot.barY(terms, {x: "x", y: "dev", fill: "part", fillOpacity: 0.85, clip: true, channels, tip: {format: {x: true, y: false, fill: true}}}),
+      Plot.ruleY([0], {stroke: "var(--theme-foreground-muted)"}),
+      Plot.dot(data, {x: "x", y: (d) => d.value - 1, r: 4, fill: "var(--theme-foreground)", stroke: "var(--theme-background)", strokeWidth: 1.5, clip: true}),
+      // Under each column's lowest point, clear of the bars.
       Plot.text(data, {
-        x: "x", y: (d) => Math.max(Math.min(1, d.cfPos, d.evf, d.cf), lo), text: (d) => pct0(d.evf), dy: 11,
+        x: "x", y: (d) => Math.max(Math.min(0, d.negOutput + d.negPaid + Math.min(0, d.profile)), lo - 1), text: (d) => pct0(d.value), dy: 11,
         fill: "var(--theme-foreground)", stroke: "var(--theme-background)", strokeWidth: 3, paintOrder: "stroke", fontSize: 10, fontWeight: "bold", clip: true
       })
     ]
   });
 }
-

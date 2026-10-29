@@ -5,7 +5,7 @@
 import {parseArgs} from "node:util";
 import {csvFormat, csvParse} from "d3-dsv";
 import {cacheRead, withCache} from "../../../lib/cache.js";
-import {dayAfterTomorrow, downloadRows} from "../../../lib/entsoe.js";
+import {dayAfterTomorrow, downloadYears} from "../../../lib/entsoe.js";
 import {monthHourProfiles} from "../../components/gen.js";
 import {START_DATE, zoneByKey} from "../../components/zones.js";
 
@@ -27,12 +27,8 @@ process.stdout.write(
     // A day before: local days start up to 3 hours before UTC midnight.
     const start = addDays(from, -1);
     const end = dayAfterTomorrow();
-    let gen = [], load = [];
-    for (let s = start; s < end; s = `${+s.slice(0, 4) + 1}-01-01`) {
-      const e = `${+s.slice(0, 4) + 1}-01-01` < end ? `${+s.slice(0, 4) + 1}-01-01` : end;
-      gen = gen.concat(await downloadRows(zone, {endpoint: "generation_per_type", start: s, end: e, aggregation: "hourly"}));
-      load = load.concat(await downloadRows(zone, {endpoint: "actual_load", start: s, end: e, aggregation: "hourly"}));
-    }
+    const gen = await downloadYears(zone, {endpoint: "generation_per_type", start, end, aggregation: "hourly"});
+    const load = await downloadYears(zone, {endpoint: "actual_load", start, end, aggregation: "hourly"});
     const fresh = monthHourProfiles(gen, load, zone)
       .filter((d) => d.month >= from.slice(0, 7))
       .map((d) => ({...d, mw: Math.round(d.mw)}));

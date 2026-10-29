@@ -28,8 +28,8 @@ fallback, shared client modules in `src/components/`, a jsdom smoke test gating 
 - **Capture factors** (`/capture`): solar and wind capture factor maps (any year or month, a
   diverging scale centred on 100%), annual and seasonal capture factors for chosen countries, and
   monthly capture factor against the technology's share of generation (y scales cut at 200%), and
-  **capture and curtailment**: per year, a plant's effective value if it stops in negative-price
-  hours, split into the capture factor of the output it still sells and the output it gives up.
+  the **capture factor decomposed** per year into price profile, output in negative hours and
+  negative prices paid. One measure throughout: the ordinary capture factor.
 
 Map colour scales are fixed per period type (P2-P98 of all zone-period values, clamped), so
 colours compare across periods.
@@ -70,10 +70,9 @@ in the page from the hourly-mix files below (`seasonalFromMonthHour`), so no sep
 needed.
 
 Residual load comes from the parameterized loader `src/data/residual/[zone].csv.js`, which
-writes one file per zone (`date,hour,price,rl,solar,wind`: every local hour since 2021 with its
-price, load − wind − solar, and solar and wind output in MW, ~1.9 MB, ~0.6 MB gzipped), so the
-prices and capture pages load only the selected country. A snapshot from before a column was added
-is downloaded again in full once. It joins hourly prices (shared raw cache), `actual_load` and hourly `generation_per_type`
+writes one file per zone (`date,hour,price,rl`: every local hour since 2021 with its price and
+load − wind − solar in MW, ~1.3 MB, ~0.4 MB gzipped), so the prices page loads only the selected
+country. It joins hourly prices (shared raw cache), `actual_load` and hourly `generation_per_type`
 on the UTC hour. Hourly generation is ~5 MB per zone-year (~500 MB for all zones since 2021), so
 the loader keeps its cached snapshot (`cache/residual/`) up to the start of the month before its
 latest month and downloads only from there (~2 s per zone a day). `RESIDUAL_FULL=1` (or
@@ -86,12 +85,19 @@ the residual loader and is incremental the same way (`cache/gen-hourly/`, `GEN_H
 forces a full re-download, ~17 s per zone).
 
 Capture prices come from `src/data/capture-monthly.csv.js` (`zone,month,tech,capture,base,gwh,
-hours`). It calls entsoemcp.com's server-side `capture_price` derivation (`/api/derivation`, JSON,
-local months; one ~1 s call per zone) for solar (B16) and wind onshore and
-offshore (B18, B19). The server weights hourly prices by hourly output, so no hourly generation
-is downloaded. The page rolls months up into years and seasons as generation-weighted capture
-price over hour-weighted baseload (`src/components/capture.js`), never as a mean of monthly
-factors.
+hours,neg_gwh,neg_capture`). Capture price, baseload and output come from entsoemcp.com's
+server-side `capture_price` derivation (`/api/derivation`, JSON, local months; one ~1 s call per
+zone) for solar (B16) and wind onshore and offshore (B18, B19). The derivation has no split by
+price sign, so the output in negative-price hours (`neg_gwh`) and its average price
+(`neg_capture`) come from hourly prices and hourly generation joined the same way the server
+joins them: baseload over every priced hour of the local month, output weighted on the hours it
+has data. That join reproduces the server's capture factors to the fourth decimal (checked on
+DE-LU, ES, FI and PL months, solar and wind, 15-minute data and DST months included); the loader
+re-checks every month and logs any that differ by more than 0.5 points. Hourly generation
+downloads are shared within a build by the residual, hourly-mix and capture loaders
+(`downloadYears`, raw cache). The page rolls months up into years and seasons from summed
+totals (`captureFactor` in `src/components/capture.js`), never as a mean of monthly factors, and
+the same roll-up gives the map, the lines and the decomposition, so they always agree.
 
 A browser-side live fetch was prototyped and dropped: it took 4–31 s per page, and entsoemcp.com
 sends no CORS headers and rate-limits per IP (HTTP 429, ~35 s Retry-After).
@@ -143,11 +149,12 @@ node test/serve-dist.mjs   # serve the built dist/ like GitHub Pages (gzip) on :
   other renewable); solar; other (oil, batteries, other). Monthly GWh = monthly mean MW × days ×
   24, local months, the month in progress dropped. AL has generation data only from 2026, so it is
   absent from the 2025 map and profiles.
-- **Capture and curtailment**: for a plant that stops whenever the day-ahead price is below zero,
-  with B the year's baseload, p the hourly price and g the hourly output: capture factor of the
-  output still sold CF₊ = Σ₍p≥0₎ p·g ÷ Σ₍p≥0₎ g ÷ B; output lost L = Σ₍p<0₎ g ÷ Σ g; effective value
-  factor EVF = Σ₍p≥0₎ p·g ÷ Σ g ÷ B = CF₊ × (1 − L), so EVF − 1 = (CF₊ − 1) + (−CF₊ × L). Reported
-  output is used as the potential, so output that was already curtailed upstream is not counted.
+- **Capture factor decomposition**: with B the period's baseload, p the hourly price, g the
+  hourly output, L = Σ₍p<0₎ g ÷ Σ g the share of output in negative hours, CF₊ the capture factor
+  of the output in positive hours and CF₋ that of the output in negative hours:
+  CF = 1 + (1 − L)(CF₊ − 1) − L + L·CF₋ (price profile; output in negative hours; negative prices
+  paid). The terms are exact and add up to the headline capture factor; a plant that stops in
+  negative hours would avoid only the last one (shown in the tooltip as "if curtailed").
 - **Capture factor** = output-weighted day-ahead price ÷ baseload (all-hours) price in the same
   period. Wind is onshore + offshore, each type weighted by its own output. A month that switched
   currency arrives split per currency and is converted to EUR before combining. Seasons are

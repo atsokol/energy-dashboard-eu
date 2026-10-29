@@ -14,9 +14,9 @@ converted to EUR. Wind is onshore and offshore together.
 
 ```js
 import {zonesIn} from "./components/zones.js"
-import {annualFactors, curtailmentEffect, monthlyFactors, pivotDomain, seasonalFactors, withShares} from "./components/capture.js"
+import {annualFactors, monthlyFactors, pivotDomain, seasonalFactors, withShares} from "./components/capture.js"
 import {linkPeriod, linkValue, periodLinks, regionInput, rememberZone, savedZone} from "./components/linking.js"
-import {captureLines, captureShareScatter, curtailmentChart, linkMapToInput, zoneMap} from "./components/charts.js"
+import {captureDecompositionChart, captureLines, captureShareScatter, linkMapToInput, zoneMap} from "./components/charts.js"
 ```
 
 ```js
@@ -38,8 +38,12 @@ const geo = await FileAttachment("./data/europe.geo.json").json()
 
 ```js
 // Parsed by hand rather than with {typed: true}, so months stay "YYYY-MM-DD" strings (see dam.js).
+// Negative-hour totals are blank where the hourly join had no output (and absent in snapshots
+// from before they were added): such rows get no neg_* fields, so captureFactor leaves their
+// periods undecomposed.
 const capture = captureRaw.map((d) => ({
-  zone: d.zone, month: d.month, tech: d.tech, capture: +d.capture, base: +d.base, gwh: +d.gwh, hours: +d.hours
+  zone: d.zone, month: d.month, tech: d.tech, capture: +d.capture, base: +d.base, gwh: +d.gwh, hours: +d.hours,
+  ...(d.neg_gwh ? {neg_gwh: +d.neg_gwh, neg_capture: +d.neg_capture} : {})
 }))
 const generation = generationRaw.map((d) => ({zone: d.zone, month: d.month, group: d.group, gwh: +d.gwh}))
 
@@ -193,94 +197,47 @@ pair(...TECHS.map((tech) => captureShareScatter({
 })))
 ```
 
-## Capture and curtailment
+## What makes up the capture factor
 
-What a plant earns once negative prices are counted in. A plant without support for negative
-hours stops producing when the day-ahead price falls below zero; its effective value, per MWh it
-could have produced, is then the capture factor of the output it still sells (blue: above or
-below the baseload line) less the output it gives up in negative hours (orange). The hollow dot is
-the ordinary capture factor, which sells through those hours at a loss. Hourly prices and output;
-a year needs all twelve months, except the year to date.
+The capture factor (CF) is the average price a plant's output earns, divided by the baseload price
+(the average price of all hours). Splitting the output by the sign of the hour's price:
+
+```tex
+\mathrm{CF} \;=\; 1 \;+\; (1-L)\,(\mathrm{CF}_{+}-1) \;-\; L \;+\; L\,\mathrm{CF}_{-}
+```
+
+where ${tex`L`} is the share of the output produced in hours with a negative price, and
+${tex`\mathrm{CF}_{+}`} and ${tex`\mathrm{CF}_{-}`} are the average prices earned by the output in
+positive-price and in negative-price hours, each divided by the baseload price
+(${tex`\mathrm{CF}_{-}`} is below zero). Starting from the baseload price (1, or 100%):
+
+- **Price profile**, ${tex`(1-L)(\mathrm{CF}_{+}-1)`}: the output sold at positive prices (a share
+  ${tex`1-L`}) earns more or less than the baseload price, depending on when it is produced;
+- **Output in negative hours**, ${tex`-L`}: the rest of the output earns no positive price at all;
+- **Negative prices paid**, ${tex`L\,\mathrm{CF}_{-}`}: it pays the negative prices on top. A plant
+  that stops producing when the price turns negative avoids this part, but not the one before.
+
+The parts are in percentage points of the baseload price and add up exactly to the capture factor.
 
 ```js
 zoneInput
 ```
 
 ```js
-// One file per zone (the residual-load files of the prices page, which carry hourly solar and
-// wind output), so the page loads only the selected country; FileAttachment needs literal paths.
-const RESIDUAL = {
-  DE_LU: FileAttachment("./data/residual/DE_LU.csv"),
-  FR: FileAttachment("./data/residual/FR.csv"),
-  BE: FileAttachment("./data/residual/BE.csv"),
-  NL: FileAttachment("./data/residual/NL.csv"),
-  AT: FileAttachment("./data/residual/AT.csv"),
-  CH: FileAttachment("./data/residual/CH.csv"),
-  IE_SEM: FileAttachment("./data/residual/IE_SEM.csv"),
-  ES: FileAttachment("./data/residual/ES.csv"),
-  PT: FileAttachment("./data/residual/PT.csv"),
-  IT_NORD: FileAttachment("./data/residual/IT_NORD.csv"),
-  IT_CNOR: FileAttachment("./data/residual/IT_CNOR.csv"),
-  IT_CSUD: FileAttachment("./data/residual/IT_CSUD.csv"),
-  IT_SUD: FileAttachment("./data/residual/IT_SUD.csv"),
-  IT_CALA: FileAttachment("./data/residual/IT_CALA.csv"),
-  IT_SICI: FileAttachment("./data/residual/IT_SICI.csv"),
-  IT_SARD: FileAttachment("./data/residual/IT_SARD.csv"),
-  DK_1: FileAttachment("./data/residual/DK_1.csv"),
-  DK_2: FileAttachment("./data/residual/DK_2.csv"),
-  NO_1: FileAttachment("./data/residual/NO_1.csv"),
-  NO_2: FileAttachment("./data/residual/NO_2.csv"),
-  NO_3: FileAttachment("./data/residual/NO_3.csv"),
-  NO_4: FileAttachment("./data/residual/NO_4.csv"),
-  NO_5: FileAttachment("./data/residual/NO_5.csv"),
-  SE_1: FileAttachment("./data/residual/SE_1.csv"),
-  SE_2: FileAttachment("./data/residual/SE_2.csv"),
-  SE_3: FileAttachment("./data/residual/SE_3.csv"),
-  SE_4: FileAttachment("./data/residual/SE_4.csv"),
-  FI: FileAttachment("./data/residual/FI.csv"),
-  EE: FileAttachment("./data/residual/EE.csv"),
-  LV: FileAttachment("./data/residual/LV.csv"),
-  LT: FileAttachment("./data/residual/LT.csv"),
-  PL: FileAttachment("./data/residual/PL.csv"),
-  CZ: FileAttachment("./data/residual/CZ.csv"),
-  SK: FileAttachment("./data/residual/SK.csv"),
-  HU: FileAttachment("./data/residual/HU.csv"),
-  SI: FileAttachment("./data/residual/SI.csv"),
-  HR: FileAttachment("./data/residual/HR.csv"),
-  RO: FileAttachment("./data/residual/RO.csv"),
-  BG: FileAttachment("./data/residual/BG.csv"),
-  GR: FileAttachment("./data/residual/GR.csv"),
-  RS: FileAttachment("./data/residual/RS.csv"),
-  ME: FileAttachment("./data/residual/ME.csv"),
-  MK: FileAttachment("./data/residual/MK.csv"),
-  AL: FileAttachment("./data/residual/AL.csv")
-}
-```
-
-```js
-const residualRaw = await RESIDUAL[zone].csv()
-```
-
-```js
-// Older snapshots have no solar and wind columns: no curtailment rows until the next build.
-const curtailment = residualRaw.columns.includes("solar")
-  ? curtailmentEffect(residualRaw.map((d) => ({date: d.date, price: +d.price, solar: +d.solar, wind: +d.wind})), {openYear})
-  : []
+// The annual rows of the lines above, where the year's months carry their negative-hour totals.
+const decomposed = annual.filter((d) => d.zone === zone && "profile" in d)
 // One scale for both technologies, cut at 200% like the lines above.
-const curtailDomain = [
-  Math.min(0.5, d3.min(curtailment, (d) => Math.min(d.evf, d.cf)) ?? 0.5) - 0.05,
-  Math.min(CAPTURE_MAX, Math.max(1.1, d3.max(curtailment, (d) => d.cfPos) ?? 1) + 0.05)
+const decompositionDomain = [
+  Math.min(0.5, d3.min(decomposed, (d) => d.value) ?? 0.5) - 0.05,
+  Math.min(CAPTURE_MAX, Math.max(1.1, d3.max(decomposed, (d) => 1 + d.profile) ?? 1) + 0.05)
 ]
 ```
 
 ```js
-curtailment.length
-  ? pair(...TECHS.map((tech) => {
-      const rows = curtailment.filter((d) => d.tech === tech);
-      return rows.length
-        ? curtailmentChart({d3, Plot, rows, tech, zone, openYear, lastMonthShort, width: halfWidth, domain: curtailDomain})
-        : html`<p>No ${tech} output reported for this country.</p>`;
-    }))
-  : html`<p>No hourly solar and wind output for this country yet.</p>`
+pair(...TECHS.map((tech) => {
+  const rows = decomposed.filter((d) => d.tech === tech);
+  return rows.length
+    ? captureDecompositionChart({d3, Plot, rows, tech, zone, openYear, lastMonthShort, width: halfWidth, domain: decompositionDomain})
+    : html`<p>No ${tech} capture factor to decompose for this country.</p>`;
+}))
 ```
-
