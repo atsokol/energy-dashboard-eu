@@ -199,18 +199,25 @@ pair(...TECHS.map((tech) => captureShareScatter({
 
 ## What makes up the capture factor
 
-The capture factor of each year splits into three parts, in percentage points of the baseload
-price. With L the share of the year's output produced in negative-price hours, CF₊ the capture
-factor of the rest and CF₋ that of the output in negative hours:
+The capture factor (CF) is the average price a plant's output earns, divided by the baseload price
+(the average price of all hours). Splitting the output by the sign of the hour's price:
 
 ```tex
-\mathrm{CF} \;=\; 1 \;+\; \underbrace{(1-L)\,(\mathrm{CF}_{+}-1)}_{\text{price profile}} \;\underbrace{-\;L}_{\text{output in negative hours}} \;+\; \underbrace{L\,\mathrm{CF}_{-}}_{\text{negative prices paid}}
+\mathrm{CF} \;=\; 1 \;+\; (1-L)\,(\mathrm{CF}_{+}-1) \;-\; L \;+\; L\,\mathrm{CF}_{-}
 ```
 
-The **price profile** is how the hours it produces in with a positive price compare with the
-average hour. The output in **negative hours** earns nothing towards it, and on top of that pays
-the **negative prices** themselves. A plant that stops producing in negative hours avoids only the
-last part. The three parts add up to the capture factor shown on the maps and lines above.
+where ${tex`L`} is the share of the output produced in hours with a negative price, and
+${tex`\mathrm{CF}_{+}`} and ${tex`\mathrm{CF}_{-}`} are the average prices earned by the output in
+positive-price and in negative-price hours, each divided by the baseload price
+(${tex`\mathrm{CF}_{-}`} is below zero). Starting from the baseload price (1, or 100%):
+
+- **Price profile**, ${tex`(1-L)(\mathrm{CF}_{+}-1)`}: the output sold at positive prices (a share
+  ${tex`1-L`}) earns more or less than the baseload price, depending on when it is produced;
+- **Output in negative hours**, ${tex`-L`}: the rest of the output earns no positive price at all;
+- **Negative prices paid**, ${tex`L\,\mathrm{CF}_{-}`}: it pays the negative prices on top. A plant
+  that stops producing when the price turns negative avoids this part, but not the one before.
+
+The parts are in percentage points of the baseload price and add up exactly to the capture factor.
 
 ```js
 zoneInput
