@@ -199,6 +199,9 @@ pair(...TECHS.map((tech) => captureShareScatter({
 
 ## What makes up the capture factor
 
+<details>
+<summary>How the capture factor is decomposed</summary>
+
 The capture factor (CF) is the average price a plant's output earns, divided by the baseload price
 (the average price of all hours). Splitting the output by the sign of the hour's price:
 
@@ -218,6 +221,8 @@ positive-price and in negative-price hours, each divided by the baseload price
   that stops producing when the price turns negative avoids this part, but not the one before.
 
 The parts are in percentage points of the baseload price and add up exactly to the capture factor.
+
+</details>
 
 ```js
 zoneInput

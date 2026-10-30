@@ -1210,7 +1210,7 @@ export function captureDecompositionChart({d3, Plot, rows, tech, zone, openYear,
     marks: [
       Plot.barY(terms, {x: "x", y: "dev", fill: "part", fillOpacity: 0.85, clip: true, channels, tip: {format: {x: true, y: false, fill: true}}}),
       Plot.ruleY([0], {stroke: "var(--theme-foreground-muted)"}),
-      Plot.dot(data, {x: "x", y: (d) => d.value - 1, r: 4, fill: "var(--theme-foreground)", stroke: "var(--theme-background)", strokeWidth: 1.5, clip: true}),
+      Plot.dot(data, {x: "x", y: (d) => d.value - 1, r: 4, fill: "none", stroke: "var(--theme-foreground)", strokeWidth: 1.5, clip: true}),
       // Under each column's lowest point, clear of the bars.
       Plot.text(data, {
         x: "x", y: (d) => Math.max(Math.min(0, d.negOutput + d.negPaid + Math.min(0, d.profile)), lo - 1), text: (d) => pct0(d.value), dy: 11,
